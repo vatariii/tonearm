@@ -57,22 +57,28 @@ flowchart LR
   C -.-> T
 ```
 
-## Four presets
+## Five presets
 
 <p align="center">
-  <img src="docs/media/presets.webp" width="880" alt="One expanded Tonearm card changing through the four presets in turn: Glass, Minimal, Neon and Editorial, with the active name underlined below.">
+  <img src="docs/media/presets.webp" width="880" alt="One expanded Tonearm card changing through four of the presets in turn: Glass, Minimal, Neon and Editorial, with the active name underlined below.">
 </p>
 
-The presets differ in more than color. **Glass** builds a frosted surface from a blurred copy of the artwork. **Minimal** is flat and quiet and shows only the remaining time. **Neon** is dark glass with a glowing edge and progress line. **Editorial** sets the title in a serif over full-bleed artwork. Each has its own type, surface and transitions.
+The presets differ in more than color. **Glass** builds a frosted surface from a blurred copy of the artwork. **Minimal** is flat and quiet and shows only the remaining time. **Neon** is dark glass with a glowing edge and progress line. **Editorial** sets the title in a serif over full-bleed artwork. **Turntable** puts the album sleeve behind a spinning record, with a tonearm that lifts on pause and tracks inward through the song. The record's color and label come from the cover. Each has its own type, surface and transitions.
+
+<p align="center">
+  <img src="docs/media/turntable/expanded.webp" width="650" alt="Turntable preset, expanded layout: SZA's SOS sleeve behind a blue record, with the tonearm on the grooves.">
+</p>
 
 <details>
-<summary>All sixteen preset and layout combinations</summary>
+<summary>All twenty preset and layout combinations</summary>
 <br>
 
 <img src="docs/media/presets/glass.webp" width="880" alt="Glass preset in its vertical, square, expanded and compact layouts">
 <img src="docs/media/presets/minimal.webp" width="880" alt="Minimal preset in its vertical, square, expanded and compact layouts">
 <img src="docs/media/presets/neon.webp" width="880" alt="Neon preset in its vertical, square, expanded and compact layouts">
 <img src="docs/media/presets/editorial.webp" width="880" alt="Editorial preset in its vertical, square, expanded and compact layouts">
+<img src="docs/media/turntable/palettes.webp" width="880" alt="Turntable preset in the square layout with five albums: SOS, Wonder, Merry Christmas, Positions and 143">
+<img src="docs/media/turntable/vertical.webp" width="210" alt="Turntable preset, vertical layout"> <img src="docs/media/turntable/compact.webp" width="310" alt="Turntable preset, compact layout">
 
 </details>
 
@@ -97,7 +103,7 @@ Compact and expanded bars, a square card and a tall vertical card. Each layout r
 
 ## Install
 
-1. Download `tonearm-v0.2.0-windows-x64.zip` from the [latest release](https://github.com/cxrlosxk/tonearm/releases/latest).
+1. Download `tonearm-v0.3.0-windows-x64.zip` from the [latest release](https://github.com/cxrlosxk/tonearm/releases/latest).
 2. Close OBS completely, including from the system tray.
 3. Extract the zip into your OBS folder, usually `C:\Program Files\obs-studio`. It contains an `obs-plugins` and a `data` folder that **merge** into the ones already there; if Windows asks, choose to merge, never to replace.
 4. Start OBS, click **+** under Sources and add **Tonearm Now Playing**.

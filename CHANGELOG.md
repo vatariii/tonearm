@@ -4,6 +4,13 @@ All notable changes to Tonearm are listed here. The format follows [Keep a Chang
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-11-25
+
+### Added
+
+- Turntable preset: a vinyl deck with the album sleeve behind a spinning record and a tonearm that follows the song. Animated artwork plays on the sleeve only.
+- `tonearm-render --tracks` renders documentation images from real covers and track info, and `tools/media/read-covers.ps1` saves them from Apple Music through the Windows media session.
+
 ### Changed
 
 - Turntable preset redesigned. The record now sits on a machined platter in front of its sleeve, with a full tonearm assembly (bearing housing, counterweight, offset headshell and a cartridge in the cover's accent color) and an arm rest. The pressing is colored from the artwork but kept apart from the sleeve: luminous on dark covers, deep on light ones, a second cover hue when the main one matches the sleeve, and classic black vinyl for monochrome covers. Grooves, track gaps, run-out and a printed label are rendered once per track; the light stays fixed while the record turns under it.
@@ -53,4 +60,6 @@ Internal preview, never published as a GitHub release. Everything below ships in
 - Bundled Inter, IBM Plex and EB Garamond fonts (SIL OFL 1.1).
 - `tonearm-render`, a headless renderer for documentation images, and a scripted test player (`TONEARM_SCRIPTED_MEDIA=1`).
 
+[Unreleased]: https://github.com/cxrlosxk/tonearm/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/cxrlosxk/tonearm/releases/tag/v0.3.0
 [0.2.0]: https://github.com/cxrlosxk/tonearm/releases/tag/v0.2.0

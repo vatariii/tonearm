@@ -15,7 +15,7 @@ Tonearm is a regular OBS plugin: one DLL and a folder of data files.
 
    The licence, notice, changelog and a copy of this README sit inside `data\obs-plugins\tonearm\`, so nothing is added to the OBS folder itself.
 
-4. Start OBS. **Help → Log Files → View Current Log** should contain a line like `[tonearm] loaded version 0.2.0`.
+4. Start OBS. **Help → Log Files → View Current Log** should contain a line like `[tonearm] loaded version 0.3.0`.
 
 ### Alternative location
 
