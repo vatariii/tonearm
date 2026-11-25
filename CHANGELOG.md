@@ -60,6 +60,6 @@ Internal preview, never published as a GitHub release. Everything below ships in
 - Bundled Inter, IBM Plex and EB Garamond fonts (SIL OFL 1.1).
 - `tonearm-render`, a headless renderer for documentation images, and a scripted test player (`TONEARM_SCRIPTED_MEDIA=1`).
 
-[Unreleased]: https://github.com/cxrlosxk/tonearm/compare/v0.3.0...HEAD
-[0.3.0]: https://github.com/cxrlosxk/tonearm/releases/tag/v0.3.0
-[0.2.0]: https://github.com/cxrlosxk/tonearm/releases/tag/v0.2.0
+[Unreleased]: https://github.com/vatariii/tonearm/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/vatariii/tonearm/releases/tag/v0.3.0
+[0.2.0]: https://github.com/vatariii/tonearm/releases/tag/v0.2.0
