@@ -4,7 +4,7 @@ The rules behind the images in the README and docs, so new media stays consisten
 
 ## Idea
 
-Tonearm's cards are the subject, so the page around them stays dark, quiet and neutral, like a stage with the lights down. Colour comes from the record that's playing: every stage takes a faint tint from the artwork it shows. The only literal record-player reference is a set of wide, almost invisible rings in the corner of each stage and the small mark next to the wordmark.
+Tonearm's cards are the subject, so the page around them stays dark, quiet and neutral, like a stage with the lights down. Colour comes from the record that's playing: every stage takes a faint tint from the artwork it shows. Outside the Turntable preset itself, the only record-player references are a set of wide, almost invisible rings in the corner of each stage and the small mark next to the wordmark.
 
 ## Tokens
 
@@ -18,7 +18,7 @@ Tonearm's cards are the subject, so the page around them stays dark, quiet and n
 | Ink (dark theme) | `#ECE8F0` | Wordmark on dark backgrounds |
 | Badge | `#4A4458` | Shields.io badge colour |
 
-Stage tints used so far: hero `(226, 128, 84)`, presets `(76, 178, 150)`, layouts `(80, 170, 150)`, preset sheets `(170, 80, 200)`, animated artwork collection `(120, 132, 170)`. Per-album clips take the median colour of their own cover.
+Stage tints used so far: hero `(226, 128, 84)` (Turntable at the center since 0.3.0), presets `(76, 178, 150)`, layouts `(80, 170, 150)`, preset sheets `(170, 80, 200)`, animated artwork collection `(120, 132, 170)`. Per-album clips take the median colour of their own cover.
 
 ## Type
 
@@ -37,7 +37,7 @@ Stage tints used so far: hero `(226, 128, 84)`, presets `(76, 178, 150)`, layout
 ## Motion
 
 - 30 fps, seamless loops. Rendered loops are closed by seeking the timeline back to its start; recorded loops are closed with a 0.6 s crossfade.
-- One thing moves at a time where possible: the hero changes one card's track, the preset loop changes one style every 3 s, the layouts loop changes track every 4 s.
+- One thing moves at a time where possible: the hero changes one card's track, the preset loop changes one style every 3 s across all five presets, the layouts loop changes track every 4 s.
 - No invented motion. Rendered media comes from Tonearm's real scene, rasterizer and compositor (`tonearm-render`, `tonearm-sequence`). Animated artwork comes only from recordings of the plugin in OBS.
 
 ## Formats
