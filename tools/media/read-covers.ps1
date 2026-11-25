@@ -13,6 +13,7 @@ Add-Type -AssemblyName System.Runtime.WindowsRuntime
 $asTask = [System.WindowsRuntimeSystemExtensions].GetMethods() | Where-Object {
   $_.Name -eq 'AsTask' -and $_.GetParameters().Count -eq 1 -and
   $_.GetParameters()[0].ParameterType.Name -eq 'IAsyncOperation`1' } | Select-Object -First 1
+$asStream = [System.IO.WindowsRuntimeStreamExtensions].GetMethod('AsStreamForRead', [type[]]@([Windows.Storage.Streams.IInputStream, Windows.Storage.Streams, ContentType=WindowsRuntime]))
 function Await($op, [Type]$t) { $task = $asTask.MakeGenericMethod($t).Invoke($null, @($op)); $task.Wait(-1) | Out-Null; $task.Result }
 
 $null = [Windows.Media.Control.GlobalSystemMediaTransportControlsSessionManager, Windows.Media.Control, ContentType=WindowsRuntime]
@@ -48,7 +49,9 @@ while ($saved.Count -lt $albums.Count -and (Get-Date) -lt $deadline) {
       if ($p.Thumbnail) {
         $stream = Await ($p.Thumbnail.OpenReadAsync()) ([Windows.Storage.Streams.IRandomAccessStreamWithContentType])
         $ms = New-Object System.IO.MemoryStream
-        [System.IO.WindowsRuntimeStreamExtensions]::AsStreamForRead($stream).CopyTo($ms)
+        # Called through reflection: PowerShell can't bind a WinRT stream to this overload directly.
+        $netStream = $asStream.Invoke($null, @($stream))
+        $netStream.CopyTo($ms); $netStream.Dispose()
         $bytes = $ms.ToArray()
         if ($bytes.Length -lt 100) { Write-Host "Cover for $($m.Album) came back empty, retrying"; Start-Sleep -Seconds 2; continue }
         $ext = if ($bytes[0] -eq 0x89) { 'png' } else { 'jpg' }
