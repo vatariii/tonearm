@@ -11,6 +11,10 @@
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
+#include <fstream>
+#include <functional>
+#include <sstream>
+#include <vector>
 #include <map>
 #include <string>
 
@@ -36,6 +40,7 @@ struct Args {
 	bool noArt = false;
 	bool reduced = false;
 	int width = 0, height = 0;
+	std::string tracks; // manifest of real tracks (see loadManifest)
 };
 
 Args parse(int argc, char **argv)
@@ -74,6 +79,8 @@ Args parse(int argc, char **argv)
 			a.at = std::atof(next().c_str());
 		else if (k == "--margin")
 			a.margin = std::atoi(next().c_str());
+		else if (k == "--tracks")
+			a.tracks = next();
 		else if (k == "--no-art")
 			a.noArt = true;
 		else if (k == "--reduced-motion")
@@ -111,10 +118,83 @@ Image stage(int w, int h, float scale)
 	return img;
 }
 
+// Real tracks for documentation renders. The manifest is tab-separated, one track
+// per line: cover.rgba, title, artist, album, duration in seconds. Each cover is
+// "RGBA <w> <h>\n" followed by straight RGBA bytes (tools/media/covers.py writes them).
+struct ManifestTrack {
+	TrackInfo info;
+	double duration = 200;
+};
+
+std::vector<ManifestTrack> loadManifest(const std::string &path)
+{
+	std::vector<ManifestTrack> out;
+	std::ifstream in(path);
+	const auto dir = std::filesystem::path(path).parent_path();
+	std::string line;
+	while (std::getline(in, line)) {
+		std::vector<std::string> f;
+		std::stringstream ss(line);
+		std::string cell;
+		while (std::getline(ss, cell, '\t'))
+			f.push_back(cell);
+		if (f.size() < 5)
+			continue;
+		ManifestTrack t;
+		t.info.title = f[1];
+		t.info.artist = f[2];
+		t.info.album = f[3];
+		t.info.albumArtist = f[2];
+		t.duration = std::atof(f[4].c_str());
+		std::ifstream img(dir / f[0], std::ios::binary);
+		std::string magic;
+		int w = 0, h = 0;
+		img >> magic >> w >> h;
+		img.get();
+		if (magic == "RGBA" && w > 0 && h > 0) {
+			std::vector<uint8_t> px(static_cast<size_t>(w) * h * 4);
+			img.read(reinterpret_cast<char *>(px.data()), static_cast<std::streamsize>(px.size()));
+			t.info.artwork = std::make_shared<Image>(Image::fromRgbaStraight(w, h, px.data(), w * 4));
+			t.info.artworkHash = std::hash<std::string>{}(f[0]);
+		}
+		out.push_back(std::move(t));
+	}
+	return out;
+}
+
+class ManifestProvider final : public MediaProvider {
+public:
+	std::vector<ManifestTrack> tracks;
+	Clock::time_point now{};
+	void start() override {}
+	void stop() override {}
+	void set(int index, PlaybackStatus status, double positionSec, bool withArtwork)
+	{
+		const auto &t = tracks[static_cast<size_t>(index) % tracks.size()];
+		MediaSession s;
+		s.appId = "AppleInc.AppleMusicWin_nzyj5cx40ttba!App";
+		s.appName = "Apple Music";
+		s.status = status;
+		s.track = t.info;
+		if (!withArtwork)
+			s.track.artwork.reset();
+		s.timeline.known = true;
+		s.timeline.durationSec = t.duration;
+		s.timeline.positionSec = positionSec;
+		s.timeline.sampledAt = now;
+		MediaSnapshot snap;
+		snap.state = ProviderState::Ready;
+		snap.systemCurrentAppId = s.appId;
+		snap.sessions.push_back(std::move(s));
+		publish(std::move(snap));
+	}
+};
+
 struct Harness {
 	Style style;
 	Scene scene;
 	DemoProvider provider;
+	ManifestProvider real;
 	std::unique_ptr<TextEngine> text;
 	Clock::time_point base = Clock::now();
 	bool noArt = false;
@@ -123,13 +203,19 @@ struct Harness {
 
 	void setTrack(int idx, PlaybackStatus st, double pos, double t)
 	{
-		provider.setNow(base + std::chrono::duration_cast<Clock::duration>(std::chrono::duration<double>(t)));
+		const auto now = base + std::chrono::duration_cast<Clock::duration>(std::chrono::duration<double>(t));
+		if (!real.tracks.empty()) {
+			real.now = now;
+			real.set(idx, st, pos, !noArt);
+			return;
+		}
+		provider.setNow(now);
 		provider.set(idx, st, pos, !noArt);
 	}
 
 	void step(double t)
 	{
-		auto snap = provider.snapshot();
+		auto snap = real.tracks.empty() ? provider.snapshot() : real.snapshot();
 		SceneInput in;
 		in.provider = snap->state;
 		in.session = snap->sessions.empty() ? nullptr : &snap->sessions[0];
@@ -185,6 +271,13 @@ int main(int argc, char **argv)
 
 	Harness h(style);
 	h.noArt = a.noArt;
+	if (!a.tracks.empty()) {
+		h.real.tracks = loadManifest(a.tracks);
+		if (h.real.tracks.empty()) {
+			std::fprintf(stderr, "no tracks in %s\n", a.tracks.c_str());
+			return 1;
+		}
+	}
 	const double dt = 1.0 / std::max(1, a.fps);
 
 	if (a.mode == "still") {
@@ -265,6 +358,6 @@ int main(int argc, char **argv)
 
 	std::fprintf(stderr, "usage: tonearm-render still|transition|marquee|pause [--preset glass|minimal|neon|editorial] "
 			     "[--layout compact|expanded|square|vertical] [--track N] [--to N] [--pos S] [--status playing|paused] "
-			     "[--scale F] [--out file.png] [--outdir dir] [--bg stage|none] [--no-art] [--reduced-motion]\n");
+			     "[--scale F] [--out file.png] [--outdir dir] [--bg stage|none] [--no-art] [--reduced-motion] [--tracks manifest.tsv]\n");
 	return 2;
 }

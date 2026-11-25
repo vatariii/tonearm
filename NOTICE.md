@@ -29,9 +29,9 @@ The sample tracks, artist names, album names and cover art shown by Tonearm are 
 
 ## Media in this repository
 
-Everything under `docs/media/` except `docs/media/artwork/` is rendered by Tonearm's own code from the invented sample tracks above, and is covered by the GPL like the rest of the project. The wordmark is set in EB Garamond (SIL OFL 1.1).
+Everything under `docs/media/` except `docs/media/artwork/` and the Turntable images listed below is rendered by Tonearm's own code from the invented sample tracks above, and is covered by the GPL like the rest of the project. The wordmark is set in EB Garamond (SIL OFL 1.1).
 
-The clips in `docs/media/artwork/` are short screen recordings of Tonearm running in OBS Studio while Apple Music played. They show album artwork, including Apple Music motion artwork, for:
+The clips in `docs/media/artwork/` are short screen recordings of Tonearm running in OBS Studio while Apple Music played. `compact`, `expanded`, `square`, `vertical`, `palettes` and `motion` in `docs/media/turntable/` are rendered by Tonearm's own code from covers and track information read from Apple Music. Together they show album artwork, including Apple Music motion artwork, for:
 
 - *SOS* by SZA
 - *Wonder* by Shawn Mendes
@@ -39,7 +39,7 @@ The clips in `docs/media/artwork/` are short screen recordings of Tonearm runnin
 - *Positions* by Ariana Grande
 - *143* by Katy Perry
 
-That artwork is the property of the artists, their labels and their designers. It is not covered by Tonearm's license, is not included in the release package, and appears here only in short clips that demonstrate what the plugin displays. No audio is included. If you hold rights in any of it and want a clip removed, please open an issue and it will be taken down.
+That artwork is the property of the artists, their labels and their designers. It is not covered by Tonearm's license, is not included in the release package, and appears here only in short clips and images that demonstrate what the plugin displays. No audio is included. If you hold rights in any of it and want a clip or image removed, please open an issue and it will be taken down.
 
 ## Trademarks
 

@@ -6,7 +6,7 @@ Every setting applies immediately and shows in the preview at the top of the pro
 
 | Setting | What it does |
 |---|---|
-| **Preset** | Glass, Minimal, Neon or Editorial. Changing the preset resets the visual settings below to that preset's values but keeps your width and height. |
+| **Preset** | Glass, Minimal, Neon, Editorial or Turntable. Changing the preset resets the visual settings below to that preset's values but keeps your width and height. |
 | **Layout** | Compact, Expanded, Square or Vertical. Changing the layout also resets the size to the layout's recommended size. |
 | **Width / Height** | The source's size in pixels. Type, spacing and radii scale with it, so a 1200 × 392 expanded card looks like a sharper 600 × 196 one. Horizontal layouts may grow wider without the text growing. |
 | **Reset size for this layout** | Restores the recommended size for the current preset and layout. |
@@ -24,6 +24,7 @@ Every setting applies immediately and shows in the preview at the top of the pro
 | Minimal | 420 × 88 | 600 × 164 | 360 × 360 | 300 × 460 |
 | Neon | 460 × 100 | 600 × 196 | 360 × 360 | 300 × 460 |
 | Editorial | 480 × 108 | 600 × 212 | 360 × 360 | 300 × 500 |
+| Turntable | 540 × 132 | 650 × 220 | 400 × 400 | 340 × 540 |
 
 The source includes room for the drop shadow, so the visible card is slightly smaller than these numbers.
 
