@@ -6,22 +6,30 @@
 </p>
 
 <p align="center">
-  The song you're playing, set as a designed card inside OBS Studio.<br>
-  Five presets, four layouts, and the album's own motion artwork.
+  <b>Your music, beautifully presented.</b><br>
+  A native now-playing source for OBS Studio, with colors drawn from the artwork,
+  optional animated album art and a living vinyl turntable.
 </p>
 
 <p align="center">
-  <a href="https://github.com/cxrlosxk/tonearm/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/cxrlosxk/tonearm?style=flat-square&label=release&color=4a4458"></a>
-  <a href="#requirements"><img alt="OBS Studio 30.2 or newer on Windows 10 and 11" src="https://img.shields.io/badge/OBS_Studio-30.2%2B_·_Windows-4a4458?style=flat-square"></a>
-  <a href="LICENSE"><img alt="License: GPL-2.0-or-later" src="https://img.shields.io/badge/license-GPL--2.0--or--later-4a4458?style=flat-square"></a>
+  <a href="https://github.com/vatariii/tonearm/releases/latest">
+    <picture>
+      <source media="(prefers-color-scheme: dark)" srcset="docs/media/brand/download-dark.svg">
+      <img src="docs/media/brand/download-light.svg" alt="Download Tonearm for Windows" width="263" height="48">
+    </picture>
+  </a>
 </p>
 
 <p align="center">
-  <a href="https://github.com/cxrlosxk/tonearm/releases/latest"><b>Download</b></a> &nbsp;·&nbsp;
+  <sub>Windows 10 and 11, 64-bit &nbsp;·&nbsp; OBS Studio 30.2 or newer<br>
+  Version 0.3.0 &nbsp;·&nbsp; A&nbsp;zip, no&nbsp;installer &nbsp;·&nbsp; <a href="LICENSE">Free&nbsp;and&nbsp;open&nbsp;source</a></sub>
+</p>
+
+<p align="center">
   <a href="#install">Install</a> &nbsp;·&nbsp;
   <a href="#five-presets">Presets</a> &nbsp;·&nbsp;
   <a href="#turntable">Turntable</a> &nbsp;·&nbsp;
-  <a href="#animated-album-artwork">Animated artwork</a> &nbsp;·&nbsp;
+  <a href="#animated-album-artwork">Animated&nbsp;artwork</a> &nbsp;·&nbsp;
   <a href="docs/settings.md">Settings</a> &nbsp;·&nbsp;
   <a href="docs/troubleshooting.md">Help</a>
 </p>
@@ -32,7 +40,7 @@
   <img src="docs/media/hero.webp" width="880" alt="Four Tonearm overlays on a dark stage. The large Turntable card spins a copper record in front of its sleeve, changes to a song with a long title that scrolls, then returns. Neon and Glass bars and a tall Editorial card sit around it.">
 </p>
 
-Tonearm reads the track Windows already knows about, from Apple Music, Spotify or any other player in the volume flyout, and draws it inside OBS as a real source: title, artist, album, artwork and a progress bar that keeps moving between the player's updates. There's no browser source to host, no account to link and no API key to paste.
+Tonearm reads the track Windows already knows about, from Apple Music, Spotify or any other player in the volume flyout, and draws it inside OBS as a real source: title, artist, album, artwork and a progress bar that keeps moving between the player's updates. There's no browser source to host, no account to link and no API key to paste. Five presets and four layouts range from a slim bar along the bottom of the screen to a tall card beside your camera.
 
 ## Five presets
 
@@ -122,12 +130,12 @@ Every preset comes in four shapes: compact and expanded bars, a square card and 
 
 ## Install
 
-1. Download `tonearm-v0.3.0-windows-x64.zip` from the [latest release](https://github.com/cxrlosxk/tonearm/releases/latest).
+1. Download `tonearm-v0.3.0-windows-x64.zip` from the [latest release](https://github.com/vatariii/tonearm/releases/latest). Not the `-pdb` zip, and not the source code archives.
 2. Close OBS completely, including from the system tray.
 3. Extract the zip into your OBS folder, usually `C:\Program Files\obs-studio`. It contains an `obs-plugins` and a `data` folder that **merge** into the ones already there; if Windows asks, choose to merge, never to replace.
 4. Start OBS, click **+** under Sources and add **Tonearm Now Playing**.
 
-You'll end up with `obs-plugins\64bit\tonearm.dll` and `data\obs-plugins\tonearm\`. To uninstall, delete those two. [Getting started](docs/getting-started.md) covers the details, the alternative `C:\ProgramData` location, and first-time setup. The separate `-pdb` zip holds debug symbols and is only needed for crash reports.
+You'll end up with `obs-plugins\64bit\tonearm.dll` and `data\obs-plugins\tonearm\`. To uninstall, close OBS and delete just those two; leave the rest of the `obs-plugins` and `data` folders alone. [Getting started](docs/getting-started.md) covers the details, the alternative `C:\ProgramData` location, and first-time setup. The separate `-pdb` zip holds debug symbols and is only needed for crash reports.
 
 ## Requirements
 
@@ -170,8 +178,12 @@ Windows needs Visual Studio 2022, the Windows SDK and a libobs SDK; Linux needs 
 
 ## License and credits
 
-Tonearm is free software under the GNU General Public License, version 2 or any later version. See [LICENSE](LICENSE).
+Tonearm is free software under the GNU General Public License, version 2 or any later version. See [LICENSE](LICENSE). Tonearm is an independent software project created by Carlos under Vatari.
 
 It bundles Inter, IBM Plex Sans, IBM Plex Mono and EB Garamond under the SIL Open Font License 1.1 ([NOTICE.md](NOTICE.md)). Thanks to lingeriegoat for [OBSSpotifyPlugin](https://github.com/lingeriegoat/OBSSpotifyPlugin), which showed that a native SMTC overlay for OBS was worth doing well, and to [CoverPy](https://github.com/matteing/coverpy) for documenting how Apple Music motion artwork is structured.
 
 The album artwork in the Turntable examples and the animated-artwork recording belongs to the artists and their labels, and is shown only to demonstrate what Tonearm displays; see [NOTICE.md](NOTICE.md#media-in-this-repository). The sample tracks in every other image are invented. Apple Music, Spotify and other product names belong to their owners. Tonearm is not affiliated with or endorsed by any of them, or by the OBS Project.
+
+<br>
+
+<p align="center"><sub>Created by <a href="https://carlosk.me">Carlos</a> · A Vatari project</sub></p>
