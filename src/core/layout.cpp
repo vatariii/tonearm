@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 #include "layout.hpp"
+#include "turntable.hpp"
 
 #include <algorithm>
 
@@ -190,61 +191,89 @@ Layout computeLayout(const Style &s, const LayoutContent &content)
 
 
 	if (comp == Composition::Turntable) {
-		// The cover is a sleeve behind a procedural vinyl pressing. Both have
-		// their own geometry; the record is never filled with album artwork.
-		const bool horizontalDeck = horizontal;
-		const float progH = horizontalDeck && compact ? 0.0f : progressRowHeight(s, c, u);
+		// A record on its platter, in front of its sleeve, with the tonearm bearing
+		// beside it. Each layout picks its own record offset and the deck is fitted
+		// to the space: horizontal layouts give it the full height, square and
+		// vertical layouts give it everything above the text block.
+		float ox = 0.5f, oy = 0.0f;
+		switch (s.layout) {
+		case LayoutMode::CompactHorizontal: ox = 0.50f; oy = 0.0f; break;
+		case LayoutMode::ExpandedHorizontal: ox = 0.52f; oy = 0.0f; break;
+		case LayoutMode::Square: ox = 0.40f; oy = 0.04f; break;
+		case LayoutMode::Vertical: ox = 0.14f; oy = 0.46f; break;
+		}
+		const Rect ext = turntable::deckExtents(ox, oy);
+		const float progH = horizontal && compact ? 0.0f : progressRowHeight(s, c, u);
 		const float progGap = progH > 0 ? std::round(space3 * u) : 0;
 		const float copyH = textBlockHeight(s, c, u);
-		const float artGap = std::round(space4 * u);
+		const float deckGap = std::round((compact ? space3 : space4) * u);
+		Rect deck;
 		float side = 0;
-		float textX = inner.x;
-		float textY = inner.y;
-		float textW = inner.w;
-
-		if (horizontalDeck) {
-			side = std::max(8.0f, std::min(inner.h * 0.95f, inner.w * 0.32f));
-			L.record = {std::round(inner.x), std::round(inner.y + (inner.h - side) * 0.5f),
-				std::round(side), std::round(side)};
-			textX = std::round(std::min(inner.right() - 30.0f * u, L.record.x + side * 1.37f + space2 * u));
-			textW = std::max(0.0f, inner.right() - textX);
+		if (horizontal) {
+			side = std::min(inner.h / ext.h, inner.w * (compact ? 0.40f : 0.44f) / ext.w);
+			deck = {inner.x, inner.y + (inner.h - ext.h * side) * 0.5f, ext.w * side, ext.h * side};
 		} else {
-			const float room = inner.h - copyH - progH - progGap - artGap;
-			side = std::max(8.0f, std::min(inner.w / 1.38f, room));
-			L.record = {std::round(inner.x + (inner.w - side * 1.37f) * 0.5f), inner.y,
-				std::round(side), std::round(side)};
-			textY = L.record.bottom() + artGap;
+			const float textH = copyH + progGap + progH;
+			const float room = std::max(8.0f, inner.h - textH - deckGap);
+			side = std::min(inner.w / ext.w, room / ext.h);
+			// The arm's extents include its soft shadow; centre on the visible hardware.
+			deck = {inner.x + (inner.w - ext.w * side) * 0.5f + 0.03f * side, inner.y + (room - ext.h * side) * 0.5f,
+				ext.w * side, ext.h * side};
 		}
-		L.recordVisible = c.hasArtwork; // placeholders do not display a phantom record
-		if (L.recordVisible) {
-			L.armZone = {L.record.x, L.record.y, L.record.w * 1.25f, L.record.h};
-			L.armPivot = {L.record.x + L.record.w * 0.98f, L.record.y + L.record.h * 0.075f};
+		side = std::max(8.0f, side);
+		const Rect sleeve{std::round(deck.x - ext.x * side), std::round(deck.y - ext.y * side), std::round(side), std::round(side)};
+		float R = std::round(side * turntable::kRecordToSleeve * 0.5f);
+		Vec2 center{sleeve.cx() + ox * side, sleeve.cy() + oy * side};
+		if (compact) {
+			// Compact is the distilled deck: no sleeve, just the record and its arm,
+			// filling the bar's height with an even margin on the left.
+			const Rect bare = turntable::bareDeckExtents();
+			const float margin = std::round(space2 * u);
+			const float room = std::max(8.0f, L.card.h - margin * 2);
+			R = std::floor(std::min(room / bare.h, inner.w * 0.34f / bare.w));
+			const float top = L.card.y + (L.card.h - bare.h * R) * 0.5f;
+			center = {std::round(L.card.x + margin + std::max(0.0f, -bare.x - turntable::kPlatter) * R + turntable::kPlatter * R),
+				  std::round(top - bare.y * R)};
+			deck = {center.x + bare.x * R, top, bare.w * R, bare.h * R};
 		}
-		if (art) {
+		L.record = {std::round(center.x - R), std::round(center.y - R), R * 2, R * 2};
+		L.recordVisible = c.hasArtwork; // the idle placeholder shows no phantom record
+		L.armPivot = {L.record.cx() + turntable::kPivotX * R, L.record.cy() + turntable::kPivotY * R};
+		L.armZone = turntable::armRestBounds(L.armPivot, R);
+		L.armOuter = turntable::armAngleForRadius(0.925f);
+		L.armInner = turntable::armAngleForRadius(0.49f);
+		if (art && !compact) {
 			L.artVisible = true;
 			L.artPlacement = ArtPlacement::Inset;
-			L.art = {std::round(L.record.x + L.record.w * 0.54f), std::round(L.record.y + L.record.h * 0.065f),
-				std::round(L.record.w * 0.78f), std::round(L.record.h * 0.78f)};
-			L.artRadius = std::min(std::round(s.artworkRadius * u), L.art.w * 0.12f);
+			L.art = sleeve;
+			L.artRadius = std::min(std::round(s.artworkRadius * u), sleeve.w * 0.04f);
 		}
-		L.textColumn = {textX, textY, textW, horizontalDeck ? inner.h : inner.bottom() - textY};
-		if (horizontalDeck && compact) {
-			const float ph = std::max(1.0f, std::round(s.progressHeight * u));
-			if (s.showProgress && c.hasTimeline) {
-				L.progressVisible = true;
-				L.progressRadius = ph * 0.5f;
-				L.progress = {textX, std::round(L.card.bottom() - space2 * u - ph), textW, ph};
+
+		if (horizontal) {
+			const float textX = std::round(deck.right() + deckGap + space1 * u);
+			const float textW = std::max(0.0f, inner.right() - textX);
+			L.textColumn = {textX, inner.y, textW, inner.h};
+			if (compact) {
+				const float ph = std::max(1.0f, std::round(s.progressHeight * u));
+				if (s.showProgress && c.hasTimeline) {
+					L.progressVisible = true;
+					L.progressRadius = ph * 0.5f;
+					L.progress = {textX, std::round(inner.bottom() - ph), textW, ph};
+				}
+				const float y = inner.y + std::max(0.0f, (inner.h - (L.progressVisible ? ph + space2 * u : 0) - copyH) * 0.5f);
+				stackText(L, s, c, textX, y, textW, TextAlign::Left, false);
+			} else {
+				const float used = placeProgress(L, s, c, textX, inner.bottom(), textW, false);
+				const float avail = inner.h - (used > 0 ? used + progGap : 0);
+				const float y = inner.y + std::max(0.0f, (avail - copyH) * 0.5f);
+				stackText(L, s, c, textX, y, textW, TextAlign::Left, false);
 			}
-			const float y = inner.y + std::max(0.0f, (inner.h - copyH) * 0.5f);
-			stackText(L, s, c, textX, y, textW, TextAlign::Left, false);
-		} else if (horizontalDeck) {
-			const float used = placeProgress(L, s, c, textX, inner.bottom(), textW, false);
-			const float avail = inner.h - (used > 0 ? used + progGap : 0);
-			const float y = inner.y + std::max(0.0f, (avail - copyH) * 0.46f);
-			stackText(L, s, c, textX, y, textW, TextAlign::Left, false);
 		} else {
-			const float bottom = stackText(L, s, c, textX, textY, textW, TextAlign::Left, false);
-			placeProgress(L, s, c, textX, bottom + progGap + progH, textW, false);
+			// The text block is anchored to the bottom edge so the deck takes the slack.
+			const float textY = inner.bottom() - progH - progGap - copyH;
+			L.textColumn = {inner.x, textY, inner.w, inner.bottom() - textY};
+			stackText(L, s, c, inner.x, textY, inner.w, TextAlign::Left, false);
+			placeProgress(L, s, c, inner.x, inner.bottom(), inner.w, false);
 		}
 		return L;
 	}

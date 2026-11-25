@@ -166,9 +166,9 @@ TEST("scene: changing the style re-rasterizes once")
 TEST("scene: Turntable spins only during playback and lifts the stylus on pause")
 {
 	Rig r(makePreset("turntable", LayoutMode::ExpandedHorizontal));
-	r.run(0, 1.0);
+	r.run(0, 1.5);
 	const auto set = r.scene.currentLayers();
-	CHECK(set && set->record.valid() && set->arm.valid());
+	CHECK(set && set->record.valid() && set->arm.valid() && set->platter.valid() && set->sheen.valid());
 	auto find = [&](uint64_t imageId) -> const DrawOp * {
 		for (const auto &op : r.ops)
 			if (op.kind == DrawOp::Kind::Image && op.imageId == imageId)
@@ -176,19 +176,28 @@ TEST("scene: Turntable spins only during playback and lifts the stylus on pause"
 		return nullptr;
 	};
 	const DrawOp *playingRecord = find(set->record.id);
+	const DrawOp *playingArm = find(set->arm.id);
 	CHECK(playingRecord != nullptr);
+	// Playing: the stylus sits in the grooves, between the lead-in and the run-out.
+	CHECK(playingArm != nullptr && playingArm->rotation > set->layout.armOuter * 0.9f &&
+	      playingArm->rotation < set->layout.armInner);
 	const float before = playingRecord ? playingRecord->rotation : -1;
-	r.run(1.0, 1.2);
+	r.run(1.5, 1.7);
 	playingRecord = find(set->record.id);
 	CHECK(playingRecord != nullptr && std::fabs(playingRecord->rotation - before) > 0.1f);
-	r.setTimeline(PlaybackStatus::Paused, 35, 1.2, demoDuration(0));
-	r.run(1.2, 2.2);
+	// The static light and platter never rotate.
+	const DrawOp *sheen = find(set->sheen.id);
+	CHECK(sheen != nullptr && sheen->rotation == 0.0f);
+
+	r.setTimeline(PlaybackStatus::Paused, 35, 1.7, demoDuration(0));
+	r.run(1.7, 4.5);
 	const DrawOp *pausedRecord = find(set->record.id);
 	const DrawOp *pausedArm = find(set->arm.id);
 	CHECK(pausedRecord != nullptr);
-	CHECK(pausedArm != nullptr && pausedArm->rotation < -0.30f);
+	CHECK(pausedArm != nullptr && std::fabs(pausedArm->rotation) < 0.02f); // back on its rest
+	CHECK(pausedRecord != nullptr && pausedRecord->opacity > 0.99f);         // never a see-through ghost
 	const float held = pausedRecord ? pausedRecord->rotation : 0.0f;
-	r.run(2.2, 2.5);
+	r.run(4.5, 4.8);
 	pausedRecord = find(set->record.id);
 	CHECK(pausedRecord != nullptr);
 	if (pausedRecord) CHECK_NEAR(pausedRecord->rotation, held, 0.001f);
@@ -203,6 +212,23 @@ TEST("scene: Turntable spins only during playback and lifts the stylus on pause"
 		if (op.imageId == noMotion->record.id && std::fabs(op.rotation) < 0.001f)
 			fixed = true;
 	CHECK(fixed);
+}
+
+TEST("scene: Turntable arm tracks inward as the song plays")
+{
+	Rig early(makePreset("turntable", LayoutMode::Square));
+	early.run(0, 2);
+	Rig late(makePreset("turntable", LayoutMode::Square));
+	late.setTimeline(PlaybackStatus::Playing, demoDuration(0) - 10, 0, demoDuration(0));
+	late.run(0, 2);
+	auto armRotation = [](Rig &r) {
+		const auto set = r.scene.currentLayers();
+		for (const auto &op : r.ops)
+			if (set && op.imageId == set->arm.id)
+				return op.rotation;
+		return -1.0f;
+	};
+	CHECK(armRotation(late) > armRotation(early) + 0.15f);
 }
 
 TEST("scene: Turntable can animate the sleeve without animating the pressing")

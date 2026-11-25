@@ -138,8 +138,11 @@ private:
 	int wantElapsed_ = -1, wantRemaining_ = -1;
 
 	// Physical turntable animation (no per-frame CPU image generation).
-	float recordAngle_ = 0;
-	float stylusLift_ = 0; // 0 on the groove, 1 resting off the record
+	float recordAngle_ = 0; // platter angle, radians
+	float spin_ = 0;        // platter speed, radians per second (eases up and down)
+	float armAngle_ = 0;    // arm rotation from rest, radians (critically damped spring)
+	float armVelocity_ = 0;
+	float armTarget_ = 0;
 
 	// Playback
 	PlaybackStatus status_ = PlaybackStatus::Unknown;

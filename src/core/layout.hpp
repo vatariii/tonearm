@@ -33,9 +33,11 @@ struct Layout {
 	float shadowMargin = 0;
 
 	// Only the Turntable preset uses these; the disc and stylus are separate from the cover sleeve.
-	Rect record;
-	Rect armZone;
-	Vec2 armPivot;
+	Rect record;            // the pressing (square bounds of the disc)
+	Rect armZone;           // tonearm sprite bounds at rest
+	Vec2 armPivot;          // bearing centre
+	float armOuter = 0;     // arm rotation (radians from rest) at the first and last groove
+	float armInner = 0;
 	bool recordVisible = false;
 
 	Rect art;

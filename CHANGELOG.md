@@ -2,6 +2,15 @@
 
 All notable changes to Tonearm are listed here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and versions follow [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Changed
+
+- Turntable preset redesigned. The record now sits on a machined platter in front of its sleeve, with a full tonearm assembly (bearing housing, counterweight, offset headshell and a cartridge in the cover's accent color) and an arm rest. The pressing is colored from the artwork but kept apart from the sleeve: luminous on dark covers, deep on light ones, a second cover hue when the main one matches the sleeve, and classic black vinyl for monochrome covers. Grooves, track gaps, run-out and a printed label are rendered once per track; the light stays fixed while the record turns under it.
+- Turntable motion: the platter spins up to 33 1/3 RPM and coasts to a stop on pause, the arm lifts to its rest for pauses and track changes and sets down on the lead-in, then tracks inward with the song. The hardware is no longer dimmed on pause, and a new record settles over the old one instead of cross-fading through it.
+- Turntable layouts: each of Compact, Expanded, Square and Vertical fits its own deck composition to the space; Square and Vertical anchor the text to the bottom so the deck fills the rest. Compact is the distilled version: just the record and its arm, filling the bar's height, with no sleeve.
+- Turntable labels are designed per album: one of five understated styles (paper, split, band, foil, mark), colored from the cover and shared by every track of an album.
+
 ## [0.2.0] - 2026-11-19
 
 First public release. Tested by the author with real Apple Music playback and genuine motion artwork in OBS Studio on Windows 11.

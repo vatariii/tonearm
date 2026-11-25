@@ -149,13 +149,36 @@ void Scene::update(double t, const SceneInput &in)
 	const bool dimWanted = status_ == PlaybackStatus::Paused && style_.paused == PausedBehavior::Dim;
 	dim_ = approach(dim_, dimWanted ? 1.0f : 0.0f, static_cast<float>(dt), style_.reducedMotion ? 0.0f : 0.11f);
 
-	// The pressing turns at 33 1/3 RPM only while playing. These scalar values
-	// drive GPU transforms; the disc and arm textures are never rebuilt per frame.
+	// The platter spins up to 33 1/3 RPM while playing and coasts down on pause. The
+	// arm sets down on the lead-in, tracks inward with the song, and lifts back to its
+	// rest for pauses and track changes. These scalars only drive GPU transforms; the
+	// disc and arm textures are never rebuilt per frame.
 	if (style_.composition == Composition::Turntable) {
-		if (status_ == PlaybackStatus::Playing && !style_.reducedMotion)
-			recordAngle_ = std::fmod(recordAngle_ + static_cast<float>(dt) * 3.4906585f, 6.2831853f);
-		const float lift = status_ == PlaybackStatus::Playing ? 0.0f : 1.0f;
-		stylusLift_ = style_.reducedMotion ? lift : approach(stylusLift_, lift, static_cast<float>(dt), 0.16f);
+		const float fdt = std::min(static_cast<float>(dt), 0.05f);
+		const bool playing = status_ == PlaybackStatus::Playing;
+		const Layout *lay = cur_.layers ? &cur_.layers->layout : nullptr;
+		armTarget_ = 0.0f;
+		if (playing && lay && lay->recordVisible) {
+			const float prog = timelineKnown_ ? static_cast<float>(std::clamp(positionSec_ / durationSec_, 0.0, 1.0)) : 0.0f;
+			armTarget_ = lay->armOuter + (lay->armInner - lay->armOuter) * prog;
+			// A new record: lift, swing clear, then cue the lead-in.
+			if (transitionKind_ == TransitionKind::Track && t - transitionStart_ < duration(durTrack) * 0.85)
+				armTarget_ = 0.0f;
+		}
+		if (style_.reducedMotion) {
+			spin_ = 0;
+			armAngle_ = armTarget_;
+			armVelocity_ = 0;
+		} else {
+			spin_ = approach(spin_, playing ? 3.4906585f : 0.0f, fdt, playing ? 0.28f : 0.24f);
+			if (!playing && spin_ < 0.04f)
+				spin_ = 0;
+			recordAngle_ = std::fmod(recordAngle_ + spin_ * fdt, 6.2831853f);
+			constexpr float w0 = 6.5f; // settles in about 0.7 s without overshoot
+			const float accel = w0 * w0 * (armTarget_ - armAngle_) - 2.0f * w0 * armVelocity_;
+			armVelocity_ += accel * fdt;
+			armAngle_ += armVelocity_ * fdt;
+		}
 	}
 
 	// Animated artwork: fades in over the still cover once the host has a frame for
@@ -277,7 +300,8 @@ bool Scene::animating(double t) const
 {
 	if (prev_.layers)
 		return true;
-	if (style_.composition == Composition::Turntable && status_ == PlaybackStatus::Playing && !style_.reducedMotion)
+	if (style_.composition == Composition::Turntable && !style_.reducedMotion &&
+	    (spin_ > 0 || std::fabs(armVelocity_) > 0.0005f || std::fabs(armTarget_ - armAngle_) > 0.0005f))
 		return true;
 	if (std::fabs(appear_ - (targetVisible_ ? 1.0f : 0.0f)) > 0.001f)
 		return true;
@@ -511,29 +535,42 @@ void Scene::buildFrame(double t, std::vector<DrawOp> &out)
 		}
 	}
 
-	// The sleeve (including optional motion artwork) stays behind the vinyl.
-	// Both sprites are cached: a rotation is just a compositor transform.
+	// The sleeve (including optional motion artwork) stays behind the record. Order:
+	// platter and cast shadow, the turning pressing, the fixed light, then the arm.
 	if (turntable) {
-		auto disc = [&](const LayerSet &layer, float opacity) {
+		// The hardware is never dimmed for pauses: a see-through record would read as a
+		// ghost. The lifted arm and the stopped platter already say "paused".
+		auto deck = [&](const LayerSet &layer, float opacity, float scale, bool sheen) {
+			emitImage(out, layer.platter, opacity, {}, scale);
 			const size_t before = out.size();
-			emitImage(out, layer.record, opacity * dimArt, {});
+			emitImage(out, layer.record, opacity, {}, scale);
 			if (out.size() > before)
 				out.back().rotation = style_.reducedMotion ? 0.0f : recordAngle_;
+			if (sheen)
+				emitImage(out, layer.sheen, opacity, {}, scale);
 		};
-		if (P)
-			disc(*P, elementOpacityOut(kArt, p));
-		disc(C, P ? elementOpacityIn(kArt, p) : 1.0f);
+		// On a track change the new pressing settles onto the platter over the old one,
+		// which stays opaque underneath so the two colors never muddy into each other.
+		const bool swap = P && transitionKind_ == TransitionKind::Track && P->record.valid() && C.record.valid() &&
+				  P->layout.record.x == C.layout.record.x && P->layout.record.w == C.layout.record.w;
+		if (swap) {
+			const float in = elementOpacityIn(kArt, p);
+			deck(*P, in < 0.999f ? 1.0f : 0.0f, 1.0f, false);
+			deck(C, in, style_.reducedMotion ? 1.0f : 1.0f + 0.04f * (1.0f - easing::enter(p)), false);
+			emitImage(out, C.sheen, 1.0f, {});
+		} else {
+			if (P)
+				deck(*P, elementOpacityOut(kArt, p), 1.0f, true);
+			deck(C, P ? elementOpacityIn(kArt, p) : 1.0f, 1.0f, true);
+		}
 		const size_t before = out.size();
-		emitImage(out, C.arm, dimArt, {});
+		emitImage(out, C.arm, 1.0f, {});
 		if (out.size() > before) {
 			DrawOp &arm = out.back();
 			const Rect &zone = C.layout.armZone;
 			arm.rotationOrigin = {(C.layout.armPivot.x - zone.x) / std::max(1.0f, zone.w),
 				(C.layout.armPivot.y - zone.y) / std::max(1.0f, zone.h)};
-			float lift = stylusLift_;
-			if (P && transitionKind_ == TransitionKind::Track && !style_.reducedMotion)
-				lift = std::max(lift, std::sin(3.14159265f * p));
-			arm.rotation = -0.50f * lift;
+			arm.rotation = armAngle_;
 		}
 	}
 

@@ -27,6 +27,7 @@ add_library(tonearm_core STATIC
   src/core/style.cpp
   src/core/layout.cpp
   src/core/raster.cpp
+  src/core/turntable.cpp
   src/core/scene.cpp
   src/core/compositor_cpu.cpp
   src/core/demo.cpp
