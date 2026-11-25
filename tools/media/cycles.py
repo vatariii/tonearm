@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-2.0-or-later
-"""presets.webp: one continuous Tonearm run that cycles the four presets.
+"""presets.webp: one continuous Tonearm run that cycles the five presets.
 Switches use the plugin's own style transition; the caption row marks which
 preset is on screen."""
 import sys
@@ -83,6 +83,7 @@ def build(name, labels, styles, scale, track, size, tint, hold=3.0, fps=30, card
 if __name__ == "__main__":
     which = sys.argv[2] if len(sys.argv) > 2 else "both"
     if which in ("both", "presets"):
-        build("presets", ["Glass", "Minimal", "Neon", "Editorial"],
-              [("glass", "expanded"), ("minimal", "expanded"), ("neon", "expanded"), ("editorial", "expanded")],
+        build("presets", ["Glass", "Minimal", "Neon", "Editorial", "Turntable"],
+              [("glass", "expanded"), ("minimal", "expanded"), ("neon", "expanded"), ("editorial", "expanded"),
+               ("turntable", "expanded")],
               scale=2.1, track=1, size=(1760, 660), tint=(76, 178, 150))

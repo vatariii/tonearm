@@ -5,7 +5,7 @@
     [        ][      ][ compact   ]
 
 `layouts.webp` animates a real track change in all four at once (Editorial).
-`presets/<preset>.webp` are the static sheets for the 16-combination comparison.
+`presets/<preset>.webp` are the static sheets for the 20-combination comparison.
 """
 import sys
 from concurrent.futures import ThreadPoolExecutor
@@ -97,5 +97,5 @@ if __name__ == "__main__":
     if which in ("all", "layouts"):
         animated("editorial", (1, 4), OUT / "layouts.webp", tint=(80, 170, 150))
     if which in ("all", "sheets"):
-        for p in ["glass", "minimal", "neon", "editorial"]:
+        for p in ["glass", "minimal", "neon", "editorial", "turntable"]:
             still_sheet(p, 2, OUT / "presets" / f"{p}.webp", tint=(170, 80, 200))
