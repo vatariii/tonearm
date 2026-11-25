@@ -47,9 +47,10 @@ while ($saved.Count -lt $albums.Count -and (Get-Date) -lt $deadline) {
       if (-not $p.Thumbnail) { Write-Host "No cover reported yet for $($m.Album), waiting" }
       if ($p.Thumbnail) {
         $stream = Await ($p.Thumbnail.OpenReadAsync()) ([Windows.Storage.Streams.IRandomAccessStreamWithContentType])
-        $reader = [Windows.Storage.Streams.DataReader]::new($stream.GetInputStreamAt(0))
-        $n = Await ($reader.LoadAsync([uint32]$stream.Size)) ([uint32])
-        $bytes = New-Object byte[] $n; $reader.ReadBytes($bytes)
+        $ms = New-Object System.IO.MemoryStream
+        [System.IO.WindowsRuntimeStreamExtensions]::AsStreamForRead($stream).CopyTo($ms)
+        $bytes = $ms.ToArray()
+        if ($bytes.Length -lt 100) { Write-Host "Cover for $($m.Album) came back empty, retrying"; Start-Sleep -Seconds 2; continue }
         $ext = if ($bytes[0] -eq 0x89) { 'png' } else { 'jpg' }
         $file = "$slug.$ext"; [IO.File]::WriteAllBytes((Join-Path $out $file), $bytes)
         Add-Type -AssemblyName System.Drawing
