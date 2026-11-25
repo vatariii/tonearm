@@ -19,6 +19,13 @@ $null = [Windows.Media.Control.GlobalSystemMediaTransportControlsSessionManager,
 $null = [Windows.Storage.Streams.DataReader, Windows.Storage.Streams, ContentType=WindowsRuntime]
 $mgr = Await ([Windows.Media.Control.GlobalSystemMediaTransportControlsSessionManager]::RequestAsync()) ([Windows.Media.Control.GlobalSystemMediaTransportControlsSessionManager])
 
+# Apple Music on Windows leaves AlbumTitle empty and reports "Artist <em dash> Album" as the artist.
+$sep = " $([char]0x2014) "
+function Split-Props($p) {
+  $artist = "$($p.Artist)".Trim(); $album = "$($p.AlbumTitle)".Trim()
+  if (-not $album) { $i = $artist.LastIndexOf($sep); if ($i -gt 0) { $album = $artist.Substring($i + $sep.Length).Trim(); $artist = $artist.Substring(0, $i).Trim() } }
+  [pscustomobject]@{ Title = "$($p.Title)".Trim(); Artist = $artist; Album = $album }
+}
 function Get-Session { $mgr.GetSessions() | Where-Object { $_.SourceAppUserModelId -match 'AppleMusic|AppleInc' } | Select-Object -First 1 }
 if (-not (Get-Session)) { Write-Host 'Apple Music is not playing anything. Open it, press play, and run this again.'; exit 1 }
 
@@ -28,13 +35,16 @@ while ($saved.Count -lt $albums.Count -and (Get-Date) -lt $deadline) {
   $s = Get-Session
   if ($s) {
     $p = Await ($s.TryGetMediaPropertiesAsync()) ([Windows.Media.Control.GlobalSystemMediaTransportControlsSessionMediaProperties])
-    $key = "$($p.Title)|$($p.AlbumTitle)"
-    if ($key -ne $lastKey) { $lastKey = $key; $lastChange = Get-Date; Write-Host "Now playing: $($p.Title) - $($p.Artist) - $($p.AlbumTitle)" }
+    $m = Split-Props $p
+    $key = "$($m.Title)|$($m.Album)"
+    if ($key -ne $lastKey) { $lastKey = $key; $lastChange = Get-Date; Write-Host "Now playing: $($m.Title) / $($m.Artist) / $($m.Album)" }
     $slug = $null
-    foreach ($k in $albums.Keys) { if (-not $saved[$k] -and $p.AlbumTitle -like "*$($albums[$k])*") { $slug = $k; break } }
+    foreach ($k in $albums.Keys) { if (-not $saved[$k] -and $m.Album -like "*$($albums[$k])*") { $slug = $k; break } }
     if ($slug) {
       Start-Sleep -Milliseconds 1500
       $p = Await ($s.TryGetMediaPropertiesAsync()) ([Windows.Media.Control.GlobalSystemMediaTransportControlsSessionMediaProperties])
+      $m = Split-Props $p
+      if (-not $p.Thumbnail) { Write-Host "No cover reported yet for $($m.Album), waiting" }
       if ($p.Thumbnail) {
         $stream = Await ($p.Thumbnail.OpenReadAsync()) ([Windows.Storage.Streams.IRandomAccessStreamWithContentType])
         $reader = [Windows.Storage.Streams.DataReader]::new($stream.GetInputStreamAt(0))
@@ -44,12 +54,12 @@ while ($saved.Count -lt $albums.Count -and (Get-Date) -lt $deadline) {
         $file = "$slug.$ext"; [IO.File]::WriteAllBytes((Join-Path $out $file), $bytes)
         Add-Type -AssemblyName System.Drawing
         $img = [System.Drawing.Image]::FromFile((Join-Path $out $file)); $size = "$($img.Width)x$($img.Height)"; $img.Dispose()
-        $manifest += [ordered]@{ file=$file; title=$p.Title; artist=$p.Artist; album=$p.AlbumTitle; albumArtist=$p.AlbumArtist; size=$size }
+        $manifest += [ordered]@{ file=$file; title=$m.Title; artist=$m.Artist; album=$m.Album; rawArtist="$($p.Artist)"; size=$size }
         $saved[$slug] = $true
         Write-Host "Saved $file ($size)"
         $null = Await ($s.TrySkipNextAsync()) ([bool]); $lastChange = Get-Date
       }
-    } elseif (((Get-Date) - $lastChange).TotalSeconds -gt 20) {
+    } elseif (((Get-Date) - $lastChange).TotalSeconds -gt 45) {
       $null = Await ($s.TrySkipNextAsync()) ([bool]); $lastChange = Get-Date
     }
   }
