@@ -68,20 +68,30 @@ class DWriteTextEngine final : public TextEngine {
 public:
 	DWriteTextEngine()
 	{
-		CoInitializeEx(nullptr, COINIT_MULTITHREADED); // balanced in destructor when it succeeded
-		DWriteCreateFactory(DWRITE_FACTORY_TYPE_ISOLATED, __uuidof(IDWriteFactory5), reinterpret_cast<IUnknown **>(factory_.put()));
-		D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, d2d_.put());
-		CoCreateInstance(CLSID_WICImagingFactory, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(wic_.put()));
+		// S_OK and S_FALSE (already initialized in the same mode) each take a reference
+		// that this object must return; RPC_E_CHANGED_MODE (the thread is already an STA)
+		// takes none, and COM stays usable in that case. The engine is created and
+		// destroyed on the same thread (RasterWorker::run), so the pair stays balanced.
+		comInitialized_ = SUCCEEDED(CoInitializeEx(nullptr, COINIT_MULTITHREADED));
+		if (FAILED(DWriteCreateFactory(DWRITE_FACTORY_TYPE_ISOLATED, __uuidof(IDWriteFactory5),
+					       reinterpret_cast<IUnknown **>(factory_.put()))))
+			factory_.reset();
+		if (FAILED(D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, d2d_.put())))
+			d2d_.reset();
+		if (FAILED(CoCreateInstance(CLSID_WICImagingFactory, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(wic_.put()))))
+			wic_.reset();
 		rebuildCollection();
 	}
 
 	~DWriteTextEngine() override
 	{
+		// Every COM object goes before the apartment reference is returned.
 		collection_.reset();
 		wic_.reset();
 		d2d_.reset();
 		factory_.reset();
-		CoUninitialize();
+		if (comInitialized_)
+			CoUninitialize();
 	}
 
 	bool addFontFile(const std::string &path) override
@@ -90,6 +100,31 @@ public:
 			return false;
 		files_.push_back(widen(path));
 		return rebuildCollection();
+	}
+
+	std::vector<std::string> addFontFiles(const std::vector<std::string> &paths) override
+	{
+		// Each rebuild enumerates the whole system font set, so check the files one by
+		// one and rebuild the collection once at the end.
+		std::vector<std::string> failed;
+		if (!factory_)
+			return paths;
+		for (const std::string &p : paths) {
+			const std::wstring w = widen(p);
+			Com<IDWriteFontFile> file;
+			BOOL supported = FALSE;
+			DWRITE_FONT_FILE_TYPE fileType{};
+			DWRITE_FONT_FACE_TYPE faceType{};
+			UINT32 faces = 0;
+			if (FAILED(factory_->CreateFontFileReference(w.c_str(), nullptr, file.put())) || !file ||
+			    FAILED(file->Analyze(&supported, &fileType, &faceType, &faces)) || !supported) {
+				failed.push_back(p);
+				continue;
+			}
+			files_.push_back(w);
+		}
+		rebuildCollection();
+		return failed;
 	}
 
 	std::vector<std::string> families() override
@@ -149,13 +184,14 @@ public:
 		const UINT w = static_cast<UINT>(std::ceil(run.metrics.width)) + pad * 2 + 2;
 		const UINT h = static_cast<UINT>(std::ceil(run.metrics.lineHeight)) + pad * 2;
 		Com<IWICBitmap> bitmap;
-		if (!wic_ || FAILED(wic_->CreateBitmap(w, h, GUID_WICPixelFormat32bppPBGRA, WICBitmapCacheOnLoad, bitmap.put())))
+		if (!wic_ || !d2d_ || FAILED(wic_->CreateBitmap(w, h, GUID_WICPixelFormat32bppPBGRA, WICBitmapCacheOnLoad, bitmap.put())) ||
+		    !bitmap)
 			return run;
 
 		const D2D1_RENDER_TARGET_PROPERTIES props = D2D1::RenderTargetProperties(
 			D2D1_RENDER_TARGET_TYPE_SOFTWARE, D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED), 96.0f, 96.0f);
 		Com<ID2D1RenderTarget> rt;
-		if (FAILED(d2d_->CreateWicBitmapRenderTarget(bitmap.get(), props, rt.put())))
+		if (FAILED(d2d_->CreateWicBitmapRenderTarget(bitmap.get(), props, rt.put())) || !rt)
 			return run;
 		rt->SetTextAntialiasMode(D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE);
 		// Antialiased in both directions with grid fitting off. With vertical grid fitting,
@@ -170,7 +206,8 @@ public:
 			rt->SetTextRenderingParams(params.get());
 
 		Com<ID2D1SolidColorBrush> brush;
-		rt->CreateSolidColorBrush(D2D1::ColorF(color.r, color.g, color.b, color.a), brush.put());
+		if (FAILED(rt->CreateSolidColorBrush(D2D1::ColorF(color.r, color.g, color.b, color.a), brush.put())) || !brush)
+			return run;
 		rt->BeginDraw();
 		rt->Clear(D2D1::ColorF(0, 0, 0, 0));
 		rt->DrawTextLayout(D2D1::Point2F(static_cast<float>(pad), static_cast<float>(pad)), use, brush.get(),
@@ -178,8 +215,10 @@ public:
 		if (FAILED(rt->EndDraw()))
 			return run;
 
-		run.image = Image(static_cast<int>(w), static_cast<int>(h));
-		bitmap->CopyPixels(nullptr, w * 4, w * 4 * h, run.image.data());
+		Image img(static_cast<int>(w), static_cast<int>(h));
+		if (FAILED(bitmap->CopyPixels(nullptr, w * 4, w * 4 * h, img.data())))
+			return run;
+		run.image = std::move(img);
 		return run;
 	}
 
@@ -292,6 +331,7 @@ private:
 	Com<IWICImagingFactory> wic_;
 	Com<IDWriteFontCollection1> collection_;
 	std::vector<std::wstring> files_;
+	bool comInitialized_ = false;
 };
 
 } // namespace

@@ -206,14 +206,20 @@ private:
 			std::set<std::string> media, state;
 			{
 				std::unique_lock<std::mutex> l(signal_->mutex);
-				signal_->cv.wait_for(l, std::chrono::seconds(1), [&] {
-					return signal_->stop || signal_->sessionsDirty || !signal_->mediaDirty.empty() || !signal_->stateDirty.empty();
-				});
+				auto dirty = [&] {
+					return signal_->sessionsDirty || !signal_->mediaDirty.empty() || !signal_->stateDirty.empty();
+				};
+				signal_->cv.wait_for(l, std::chrono::seconds(1), [&] { return signal_->stop || dirty(); });
+				if (signal_->stop)
+					break;
+				// Coalesce a burst of events into one query round. Only when there is
+				// something to coalesce, and stop() still ends the wait at once. The 1 s
+				// timeout above keeps driving the periodic safety refresh below.
+				if (dirty())
+					signal_->cv.wait_for(l, std::chrono::milliseconds(60), [&] { return signal_->stop; });
 				if (signal_->stop)
 					break;
 			}
-			// Coalesce bursts of events into one query round.
-			std::this_thread::sleep_for(std::chrono::milliseconds(60));
 			{
 				std::lock_guard<std::mutex> l(signal_->mutex);
 				if (signal_->stop)

@@ -160,15 +160,18 @@ void editorialSurface(Image &card, const Style &s, const DisplayContent &c, cons
 {
 	const int w = card.width(), h = card.height();
 	const Palette &p = L.palette;
-	const bool hasArt = L.layout.artVisible;
-	const Rect a = hasArt ? localRect(L.layout.art, L.layout.card) : Rect{};
+	const Rect a = L.layout.artVisible ? localRect(L.layout.art, L.layout.card) : Rect{};
 	const bool side = L.layout.artPlacement == ArtPlacement::FullBleedLeft;
 	Image art;
+	if (L.layout.artVisible && std::lround(a.w) >= 1 && std::lround(a.h) >= 1)
+		art = artworkImage(c, p, (int)std::lround(a.w), (int)std::lround(a.h));
+	// Sampling below uses the image actually produced, never the requested rectangle.
+	const bool hasArt = !art.empty();
 	Color edgeTint = p.deep;
 	if (hasArt) {
-		art = artworkImage(c, p, (int)std::lround(a.w), (int)std::lround(a.h));
 		// The artwork's inner edge color, so the surface can pick up where the cover ends.
-		const int strip = std::max(2, static_cast<int>((side ? art.width() : art.height()) * 0.08f));
+		const int dim = side ? art.width() : art.height();
+		const int strip = std::clamp(static_cast<int>(dim * 0.08f), std::min(2, dim), dim);
 		Image edge(side ? strip : art.width(), side ? art.height() : strip);
 		for (int y = 0; y < edge.height(); ++y) {
 			const uint8_t *src = side ? art.row(y) + (art.width() - strip) * 4 : art.row(art.height() - strip + y);
@@ -452,7 +455,7 @@ std::shared_ptr<LayerSet> rasterizeLayers(const Style &s, const DisplayContent &
 			dropShadow(layer, inLayer, L.artRadius, 2.0f * u, 1.0f * u, Color{0, 0, 0, 0.25f * s.artworkShadow});
 		}
 		Image art = artworkImage(c, set->palette, static_cast<int>(inLayer.w), static_cast<int>(inLayer.h));
-		if (fill && L.scrimVisible) {
+		if (fill && L.scrimVisible && !art.empty()) {
 			const Rect sc = localRect(L.scrim, a);
 			fillRoundRect(art, {0, 0, inLayer.w, inLayer.h}, 0,
 				      Paint::linear({0, sc.y}, {0, sc.bottom()},

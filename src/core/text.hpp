@@ -48,6 +48,16 @@ public:
 
 	// Registers a font file shipped with the plugin. Returns false if it could not be loaded.
 	virtual bool addFontFile(const std::string &path) = 0;
+	// Registers several font files at once and returns the ones that failed. Backends
+	// that rebuild a font collection per file override this to rebuild only once.
+	virtual std::vector<std::string> addFontFiles(const std::vector<std::string> &paths)
+	{
+		std::vector<std::string> failed;
+		for (const std::string &p : paths)
+			if (!addFontFile(p))
+				failed.push_back(p);
+		return failed;
+	}
 
 	virtual std::vector<std::string> families() = 0;
 };

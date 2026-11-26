@@ -3,6 +3,7 @@
 #include "turntable.hpp"
 
 #include <algorithm>
+#include <cmath>
 
 namespace tonearm {
 
@@ -161,7 +162,8 @@ void baseUnit(const Style &s, float &u)
 
 } // namespace
 
-Layout computeLayout(const Style &s, const LayoutContent &content)
+namespace {
+Layout computeLayoutUnchecked(const Style &s, const LayoutContent &content)
 {
 	LayoutContent c = content;
 	Layout L;
@@ -294,7 +296,7 @@ Layout computeLayout(const Style &s, const LayoutContent &content)
 				textX = L.art.right() + std::round((compact ? space3 : space4) * u);
 			}
 		}
-		const float textW = inner.right() - textX;
+		const float textW = std::max(0.0f, inner.right() - textX);
 		L.textColumn = {textX, inner.y, textW, inner.h};
 
 		// Responsive: drop the album line before anything collides.
@@ -361,7 +363,7 @@ Layout computeLayout(const Style &s, const LayoutContent &content)
 				L.artVisible = true;
 				if (fullBleed) {
 					L.artPlacement = ArtPlacement::FullBleedTop;
-					const float side = std::min(L.card.w * 1.2f, L.card.h - block - gapProg - progH - pad * 2);
+					const float side = std::max(0.0f, std::min(L.card.w * 1.2f, L.card.h - block - gapProg - progH - pad * 2));
 					// Full bleed spans the card width; a short card crops the artwork vertically.
 					L.art = {L.card.x, L.card.y, L.card.w, std::round(side)};
 					L.artRadius = L.cardRadius;
@@ -385,6 +387,27 @@ Layout computeLayout(const Style &s, const LayoutContent &content)
 		}
 	}
 
+	return L;
+}
+
+} // namespace
+
+// Very small or lopsided canvases can leave no room for some elements. Everything
+// downstream (rasterizer, compositor, video mask) samples the artwork rectangle, so a
+// rectangle that cannot hold a single pixel is treated as no artwork at all.
+Layout computeLayout(const Style &s, const LayoutContent &content)
+{
+	Layout L = computeLayoutUnchecked(s, content);
+	auto finite = [](const Rect &r) {
+		return std::isfinite(r.x) && std::isfinite(r.y) && std::isfinite(r.w) && std::isfinite(r.h);
+	};
+	if (L.artVisible && (!finite(L.art) || L.art.w < 1.0f || L.art.h < 1.0f)) {
+		L.artVisible = false;
+		L.scrimVisible = false;
+		L.art = {};
+	}
+	L.textColumn.w = std::max(0.0f, L.textColumn.w);
+	L.textColumn.h = std::max(0.0f, L.textColumn.h);
 	return L;
 }
 

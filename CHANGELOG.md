@@ -4,6 +4,36 @@ All notable changes to Tonearm are listed here. The format follows [Keep a Chang
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-11-26
+
+Stability and security fixes from an external code audit of 0.3.0. No new features, and every preset looks as it did. Per-finding details are in [docs/audit/v0.3.1.md](docs/audit/v0.3.1.md).
+
+### Fixed
+
+- Very short or narrow cards could read outside the artwork image while rendering (for example a 300×80 Editorial card in the Square layout). Layout sizes are now clamped and the rasterizer samples only the image it actually has.
+- A data race between the settings and render threads in animated artwork playback.
+- DirectWrite text rendering returned a COM reference it didn't own when OBS had initialized the thread differently, and ignored some Direct2D failures.
+- Reset size, Export and Import could dereference a missing source.
+- **Refresh** under Sources now actually updates the list of detected players.
+- A motion video that failed to download could be downloaded again by the fallback lookup.
+- Possible NaN on pure black pixels when converting high-precision video to sRGB.
+- Small fixes: seeded noise, color clamping in fills, a needless 60 ms delay in the Windows media session loop.
+
+### Changed
+
+- Animated artwork cache is kept to 1 GiB. The least recently played videos are removed first; videos that are downloading or on screen are never removed, and only folders Tonearm created are touched. Abandoned downloads and stale index entries are cleaned up.
+- Network requests no longer follow redirects automatically. A redirect is followed only to the same lookup host, or for videos to Apple's media servers, after the same checks as the original URL.
+- When the artwork service is unreachable, rate-limits or fails, all Tonearm sources pause lookups (30 seconds, doubling to 15 minutes, or as long as the service asks) instead of retrying on every track change. Cached and local artwork keep working.
+- Large motion videos are written to disk as they download instead of being held in memory.
+- The animated artwork capture texture is released when the feature is switched off, and a paused video is no longer copied every frame.
+- Bundled fonts are registered in one pass, so the font collection is built once at startup.
+- Scene collections saved without a record of the applied preset keep their custom colors and fonts when loaded. Preset import checks the file's format version, preset, layout and value types before changing anything.
+- The User-Agent reports the actual Tonearm version.
+
+### Not yet verified
+
+- This release has not been loaded in OBS on Windows yet; its unit tests pass on Linux and Windows and the package is built by CI. See [docs/testing.md](docs/testing.md).
+
 ## [0.3.0] - 2026-11-25
 
 ### Added
@@ -60,6 +90,7 @@ Internal preview, never published as a GitHub release. Everything below ships in
 - Bundled Inter, IBM Plex and EB Garamond fonts (SIL OFL 1.1).
 - `tonearm-render`, a headless renderer for documentation images, and a scripted test player (`TONEARM_SCRIPTED_MEDIA=1`).
 
-[Unreleased]: https://github.com/vatariii/tonearm/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/vatariii/tonearm/compare/v0.3.1...HEAD
+[0.3.1]: https://github.com/vatariii/tonearm/releases/tag/v0.3.1
 [0.3.0]: https://github.com/vatariii/tonearm/releases/tag/v0.3.0
 [0.2.0]: https://github.com/vatariii/tonearm/releases/tag/v0.2.0

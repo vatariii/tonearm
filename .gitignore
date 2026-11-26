@@ -6,3 +6,5 @@
 .vscode/
 .idea/
 CMakeUserPresets.json
+__pycache__/
+*.pyc

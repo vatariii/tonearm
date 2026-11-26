@@ -2,6 +2,19 @@
 
 This page says plainly what has been checked, how, and what still needs a Windows machine. It is updated with each release.
 
+## Status for 0.3.1
+
+0.3.1 is a stability and security release based on an external code audit; what changed for each finding is in [the audit disposition](audit/v0.3.1.md).
+
+| Area | Status | How |
+|---|---|---|
+| Core, layout and rasterizer at the extremes of the size range | Verified | Every preset and layout at 10 extreme sizes (64×32 to 4096×32 and 64×4096), with and without artwork, doubled text and 1-pixel artwork. Run under AddressSanitizer and UndefinedBehaviorSanitizer; this caught a real out-of-bounds read in 0.3.0 that is now fixed |
+| URL policy, redirects, outage backoff, cache budget | Verified in unit tests | `tests/test_net_cache.cpp`, also under ThreadSanitizer |
+| Unit tests on Windows (DirectWrite) | Run by CI | Same suite on the Windows runner with MSVC |
+| Windows package | Produced by CI | Same packaging as 0.3.0 |
+| **Plugin loaded in OBS on Windows** | **Not yet checked for 0.3.1** | The changes to WinHTTP, the motion player, settings and the SMTC loop compile and package in CI but have not run inside OBS. A planned 12-hour soak test on the author's PC did not start |
+| Performance against 0.3.0 | Not measured | No benchmark numbers yet |
+
 ## Status for 0.2.0
 
 | Area | Status | How |

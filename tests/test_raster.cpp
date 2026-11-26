@@ -167,3 +167,56 @@ TEST("raster: non-Latin text renders")
 	CHECK(set->title.valid());
 	CHECK(set->title.naturalWidth > 10);
 }
+
+// Audit H-1: every preset and layout must rasterize at the extremes of the supported
+// size range (64-4096 x 32-4096), including very short, very narrow and lopsided
+// canvases, with and without artwork. Run under AddressSanitizer to catch reads
+// outside the artwork buffers.
+TEST("raster: extreme canvas sizes rasterize safely in every preset and layout")
+{
+	const LayoutMode layouts[] = {LayoutMode::CompactHorizontal, LayoutMode::ExpandedHorizontal, LayoutMode::Square,
+				      LayoutMode::Vertical};
+	const std::pair<int, int> sizes[] = {{64, 32}, {64, 4096}, {300, 80}, {300, 32}, {80, 300}, {4096, 32},
+					     {96, 96}, {120, 40}, {64, 200}, {1600, 48}};
+	for (const auto &p : presetList())
+		for (LayoutMode m : layouts)
+			for (auto [w, h] : sizes)
+				for (int variant = 0; variant < 4; ++variant) {
+					if (w * h > 100000 && variant != 1)
+						continue; // the largest canvases are slow to rasterize; one variant covers them
+					Style s = makePreset(p.id, m);
+					s.width = w;
+					s.height = h;
+					const bool art = variant & 1;
+					if (variant & 2) {
+						s.showAlbum = false;
+						s.showProgress = false;
+						s.times = TimeDisplay::Hidden;
+						for (FontSpec *f : {&s.titleFont, &s.artistFont, &s.albumFont, &s.timeFont})
+							f->sizePx *= 2.0f;
+					}
+					const std::string what = std::string(p.id) + "/" + layoutId(m) + " " + std::to_string(w) + "x" +
+								 std::to_string(h) + " v" + std::to_string(variant);
+					auto set = rasterizeLayers(s, content(3, art), testsupport::text());
+					CHECK_MSG(set && set->surface.valid(), what);
+					const Layout &L = set->layout;
+					CHECK_MSG(L.art.w >= 0 && L.art.h >= 0, what + ": negative artwork size");
+					CHECK_MSG(L.textColumn.w >= 0, what + ": negative text column");
+				}
+}
+
+TEST("raster: tiny and one-pixel artwork images are handled")
+{
+	for (int side : {1, 2, 3}) {
+		auto tiny = std::make_shared<Image>(side, side);
+		tiny->fill(Color{0.8f, 0.2f, 0.1f, 1});
+		for (const auto &p : presetList())
+			for (LayoutMode m : {LayoutMode::ExpandedHorizontal, LayoutMode::Square, LayoutMode::Vertical}) {
+				Style s = makePreset(p.id, m);
+				DisplayContent c = content(0);
+				c.artwork = tiny;
+				auto set = rasterizeLayers(s, c, testsupport::text());
+				CHECK_MSG(set && set->surface.valid(), std::string(p.id) + " " + std::to_string(side) + "px art");
+			}
+	}
+}

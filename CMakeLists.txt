@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.22)
 
-project(tonearm VERSION 0.3.0 LANGUAGES C CXX)
+project(tonearm VERSION 0.3.1 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -49,7 +49,8 @@ endif()
 # ---------------------------------------------------------------------------
 # Media providers
 # ---------------------------------------------------------------------------
-add_library(tonearm_media STATIC src/media/provider.cpp src/media/motion_resolver.cpp src/media/catalog_match.cpp src/media/demo_provider.cpp src/media/scripted_provider.cpp)
+add_library(tonearm_media STATIC src/media/provider.cpp src/media/motion_resolver.cpp src/media/catalog_match.cpp src/media/demo_provider.cpp src/media/scripted_provider.cpp
+                          src/media/net_policy.cpp src/media/cache_budget.cpp)
 target_link_libraries(tonearm_media PUBLIC tonearm_core)
 if(WIN32)
   target_sources(tonearm_media PRIVATE src/media/smtc_provider.cpp src/media/wic_decode.cpp)
@@ -93,7 +94,8 @@ if(TONEARM_BUILD_PLUGIN)
   target_compile_definitions(tonearm PRIVATE TONEARM_VERSION="${PROJECT_VERSION}" TONEARM_BUILD_REV="${TONEARM_BUILD_REV}")
 
   if(WIN32)
-    target_sources(tonearm PRIVATE src/obs/remote-motion-source.cpp src/obs/hls-cache.cpp src/obs/motion-index.cpp)
+    target_sources(tonearm PRIVATE src/obs/remote-motion-source.cpp src/obs/hls-cache.cpp src/obs/motion-index.cpp
+                                   src/obs/http-client.cpp)
     target_link_libraries(tonearm PRIVATE winhttp)
     configure_file(cmake/tonearm.rc.in ${CMAKE_CURRENT_BINARY_DIR}/tonearm.rc @ONLY)
     target_sources(tonearm PRIVATE ${CMAKE_CURRENT_BINARY_DIR}/tonearm.rc)
@@ -120,13 +122,16 @@ if(TONEARM_BUILD_TESTS)
   enable_testing()
   add_executable(tonearm-tests tests/main.cpp tests/test_color.cpp tests/test_image.cpp tests/test_media.cpp
                                tests/test_layout.cpp tests/test_scene.cpp tests/test_raster.cpp
-                               tests/test_text.cpp tests/test_motion.cpp tests/test_catalog_match.cpp)
+                               tests/test_text.cpp tests/test_motion.cpp tests/test_catalog_match.cpp
+                               tests/test_net_cache.cpp)
   target_link_libraries(tonearm-tests PRIVATE tonearm_media)
   target_compile_definitions(tonearm-tests PRIVATE TONEARM_DATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/data")
   add_test(NAME tonearm-tests COMMAND tonearm-tests)
   if(WIN32)
-    add_executable(tonearm-hls-cache-smoke tests/hls-cache-smoke.cpp src/obs/hls-cache.cpp src/obs/motion-index.cpp)
+    add_executable(tonearm-hls-cache-smoke tests/hls-cache-smoke.cpp src/obs/hls-cache.cpp src/obs/motion-index.cpp
+                                           src/obs/http-client.cpp)
     target_include_directories(tonearm-hls-cache-smoke PRIVATE src)
-    target_link_libraries(tonearm-hls-cache-smoke PRIVATE winhttp)
+    target_link_libraries(tonearm-hls-cache-smoke PRIVATE tonearm_media winhttp)
+    target_compile_definitions(tonearm-hls-cache-smoke PRIVATE TONEARM_VERSION="${PROJECT_VERSION}")
   endif()
 endif()

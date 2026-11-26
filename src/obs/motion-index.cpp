@@ -2,6 +2,8 @@
 #include "motion-index.hpp"
 #ifdef _WIN32
 
+#include "media/cache_budget.hpp"
+
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
 #include <windows.h>
@@ -19,6 +21,7 @@
 namespace tonearm {
 namespace {
 namespace fs = std::filesystem;
+
 std::mutex indexMutex;
 
 std::string u8(const fs::path &path)
@@ -26,7 +29,7 @@ std::string u8(const fs::path &path)
 	const auto bytes = path.u8string();
 	return {bytes.begin(), bytes.end()};
 }
-fs::path fromUtf8(const std::string &path) { return fs::u8path(path); }
+fs::path fromUtf8(const std::string &path) { return fs::path(std::u8string(path.begin(), path.end())); }
 
 fs::path cacheRoot()
 {
@@ -132,6 +135,7 @@ std::optional<MotionAsset> cachedMotionForAlbum(const MotionQuery &query)
 	const fs::path media = fromUtf8(location);
 	if (!validCachedAsset(root, media))
 		return std::nullopt;
+	touchMotionCacheEntry(media.parent_path()); // most recently used: last to be evicted
 	return MotionAsset{location, shape == "p" ? MotionShape::Portrait : MotionShape::Square};
 }
 
@@ -160,13 +164,24 @@ bool rememberMotionForAlbum(const MotionQuery &query, const MotionAsset &asset)
 		if (!f.good())
 			return false;
 	}
-	// Two Tonearm overlays may commit the same album in one session.
-	fs::remove(file, ec);
-	ec.clear();
-	fs::rename(temp, file, ec);
-	if (ec)
+	// Replace in one step: a reader (another overlay, or a crash in between) sees
+	// either the previous valid index or the new one, never a missing file. If the
+	// replacement fails the previous index stays as it was.
+	if (!MoveFileExW(temp.c_str(), file.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
 		fs::remove(temp, ec);
-	return !ec;
+		return false;
+	}
+	return true;
+}
+
+CachePruneResult pruneMotionCacheNow()
+{
+	const fs::path root = cacheRoot();
+	if (root.empty())
+		return {};
+	// Index files are read and replaced under this lock; pruning removes dead ones.
+	std::lock_guard<std::mutex> lock(indexMutex);
+	return pruneMotionCache(root);
 }
 } // namespace tonearm
 #endif
