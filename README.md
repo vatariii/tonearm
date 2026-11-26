@@ -22,7 +22,7 @@
 
 <p align="center">
   <sub>Windows 10 and 11, 64-bit &nbsp;·&nbsp; OBS Studio 30.2 or newer<br>
-  Version 0.3.0 &nbsp;·&nbsp; A&nbsp;zip, no&nbsp;installer &nbsp;·&nbsp; <a href="LICENSE">Free&nbsp;and&nbsp;open&nbsp;source</a></sub>
+  Version 0.3.1 &nbsp;·&nbsp; A&nbsp;zip, no&nbsp;installer &nbsp;·&nbsp; <a href="LICENSE">Free&nbsp;and&nbsp;open&nbsp;source</a></sub>
 </p>
 
 <p align="center">
@@ -130,7 +130,7 @@ Every preset comes in four shapes: compact and expanded bars, a square card and 
 
 ## Install
 
-1. Download `tonearm-v0.3.0-windows-x64.zip` from the [latest release](https://github.com/vatariii/tonearm/releases/latest). Not the `-pdb` zip, and not the source code archives.
+1. Download `tonearm-v0.3.1-windows-x64.zip` from the [latest release](https://github.com/vatariii/tonearm/releases/latest). Not the `-pdb` zip, and not the source code archives.
 2. Close OBS completely, including from the system tray.
 3. Extract the zip into your OBS folder, usually `C:\Program Files\obs-studio`. It contains an `obs-plugins` and a `data` folder that **merge** into the ones already there; if Windows asks, choose to merge, never to replace.
 4. Start OBS, click **+** under Sources and add **Tonearm Now Playing**.

@@ -21,7 +21,7 @@ int main(int argc, char **argv)
 		std::cerr << "HLS caching failed\n";
 		return 1;
 	}
-	const std::filesystem::path manifest = std::filesystem::u8path(*local);
+	const std::filesystem::path manifest = std::filesystem::path(std::u8string(local->begin(), local->end()));
 	// Persistent album index must survive provider recreation and identify
 	// the same release across different track artists.
 	tonearm::MotionQuery q;
@@ -77,7 +77,7 @@ int main(int argc, char **argv)
 			ended = true;
 		if (!line.empty() && line.front() != '#') {
 			++count;
-			if (!std::filesystem::exists(manifest.parent_path() / std::filesystem::u8path(line))) {
+			if (!std::filesystem::exists(manifest.parent_path() / std::filesystem::path(std::u8string(line.begin(), line.end())))) {
 				std::cerr << "Missing local HLS segment\n";
 				return 1;
 			}

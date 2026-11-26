@@ -17,10 +17,13 @@ void Image::clear()
 
 void Image::fill(const Color &c)
 {
-	const uint8_t b = static_cast<uint8_t>(std::lround(c.b * c.a * 255));
-	const uint8_t g = static_cast<uint8_t>(std::lround(c.g * c.a * 255));
-	const uint8_t r = static_cast<uint8_t>(std::lround(c.r * c.a * 255));
-	const uint8_t a = static_cast<uint8_t>(std::lround(c.a * 255));
+	// Clamp before premultiplying so out-of-range or non-finite input can't wrap around.
+	auto unit = [](float v) { return std::isfinite(v) ? std::clamp(v, 0.0f, 1.0f) : 0.0f; };
+	const float ca = unit(c.a);
+	const uint8_t b = static_cast<uint8_t>(std::lround(unit(c.b) * ca * 255));
+	const uint8_t g = static_cast<uint8_t>(std::lround(unit(c.g) * ca * 255));
+	const uint8_t r = static_cast<uint8_t>(std::lround(unit(c.r) * ca * 255));
+	const uint8_t a = static_cast<uint8_t>(std::lround(ca * 255));
 	for (size_t i = 0; i < px_.size(); i += 4) {
 		px_[i] = b;
 		px_[i + 1] = g;
@@ -439,7 +442,7 @@ void addNoise(Image &img, float amount, uint32_t seed)
 {
 	if (amount <= 0)
 		return;
-	uint32_t s = seed;
+	uint32_t s = seed ? seed : 0x9E3779B9u; // xorshift32 never leaves 0
 	const float amp = amount * 255.0f;
 	for (int y = 0; y < img.height(); ++y) {
 		uint8_t *p = img.row(y);

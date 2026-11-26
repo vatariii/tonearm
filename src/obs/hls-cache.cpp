@@ -3,14 +3,20 @@
 
 #ifdef _WIN32
 
+#include "http-client.hpp"
+#include "media/cache_budget.hpp"
+#include "media/net_policy.hpp"
+
 #include <windows.h>
 #include <winhttp.h>
 
 #include <algorithm>
 #include <atomic>
+#include <charconv>
 #include <chrono>
 #include <cctype>
 #include <cstdio>
+#include <cstring>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
@@ -27,16 +33,6 @@
 namespace tonearm {
 namespace {
 namespace fs = std::filesystem;
-
-struct HttpHandle {
-	HINTERNET h = nullptr;
-	explicit HttpHandle(HINTERNET value) : h(value) {}
-	~HttpHandle() { if (h) WinHttpCloseHandle(h); }
-	operator HINTERNET() const { return h; }
-	explicit operator bool() const { return h != nullptr; }
-	HttpHandle(const HttpHandle &) = delete;
-	HttpHandle &operator=(const HttpHandle &) = delete;
-};
 
 constexpr size_t kMaxManifest = 256 * 1024;
 constexpr size_t kMaxSegment = 20 * 1024 * 1024;
@@ -73,21 +69,12 @@ void cacheTrace(const char *stage) {
 
 bool appleCdnUrl(const std::string &url)
 {
-	if (url.size() < 12 || url.size() > 4096 || url.rfind("https://", 0) != 0)
-		return false;
-	auto end = url.find_first_of("/?#", 8);
-	std::string host = url.substr(8, end == std::string::npos ? std::string::npos : end - 8);
-	if (host.find_first_of("@:\\") != std::string::npos)
-		return false;
-	std::transform(host.begin(), host.end(), host.begin(),
-		       [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-	const auto match = [&](const char *domain) {
-		const std::string d(domain);
-		return host == d || (host.size() > d.size() &&
-				    host.compare(host.size() - d.size(), d.size(), d) == 0 &&
-				    host[host.size() - d.size() - 1] == '.');
-	};
-	return match("apple.com") || match("mzstatic.com");
+	return trustedAppleMediaUrl(url);
+}
+
+fs::path fromUtf8(const std::string &s)
+{
+	return fs::path(std::u8string(s.begin(), s.end()));
 }
 
 std::optional<std::string> absoluteUrl(const std::string &base, std::string child)
@@ -120,63 +107,67 @@ std::optional<std::string> absoluteUrl(const std::string &base, std::string chil
 	return appleCdnUrl(path) ? std::optional<std::string>{path} : std::nullopt;
 }
 
+HttpGet cdnRequest(const std::string &url, size_t cap)
+{
+	HttpGet req;
+	req.url = url;
+	req.allowUrl = appleCdnUrl; // also every redirect target
+	req.cap = cap;
+	req.resolveMs = req.connectMs = 4000;
+	req.sendMs = req.receiveMs = 7000;
+	return req;
+}
+
 bool fetch(const std::string &url, size_t cap, std::string &body, const std::atomic<bool> &cancelled)
+{
+	body.clear();
+	if (!appleCdnUrl(url) || cancelled)
+		return false;
+	HttpResult r = httpGet(cdnRequest(url, cap), cancelled);
+	if (!r.ok)
+		return false;
+	body = std::move(r.body);
+	return true;
+}
+
+// Streams a large download straight into `dest` instead of holding it in memory.
+// The file must start with an ISO BMFF box whose type is `ftyp` and be at least
+// `minBytes` long. A partial or rejected file is removed.
+bool fetchMp4ToFile(const std::string &url, size_t cap, size_t minBytes, const fs::path &dest,
+		    const std::atomic<bool> &cancelled)
 {
 	if (!appleCdnUrl(url) || cancelled)
 		return false;
-	std::wstring wide(url.begin(), url.end());
-	URL_COMPONENTS parts{};
-	parts.dwStructSize = sizeof(parts);
-	parts.dwSchemeLength = static_cast<DWORD>(-1);
-	parts.dwHostNameLength = static_cast<DWORD>(-1);
-	parts.dwUrlPathLength = static_cast<DWORD>(-1);
-	parts.dwExtraInfoLength = static_cast<DWORD>(-1);
-	if (!WinHttpCrackUrl(wide.c_str(), 0, 0, &parts) || parts.nScheme != INTERNET_SCHEME_HTTPS)
-		return false;
-	const std::wstring host(parts.lpszHostName, parts.dwHostNameLength);
-	std::wstring requestPath(parts.lpszUrlPath, parts.dwUrlPathLength);
-	if (parts.lpszExtraInfo)
-		requestPath.append(parts.lpszExtraInfo, parts.dwExtraInfoLength);
-
-	HttpHandle session(WinHttpOpen(L"Tonearm/0.2 (OBS Studio HLS cache)",
-				      WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY,
-				      WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0));
-	if (!session)
-		return false;
-	WinHttpSetTimeouts(session, 4000, 4000, 7000, 7000);
-	HttpHandle connection(WinHttpConnect(session, host.c_str(), parts.nPort, 0));
-	if (!connection)
-		return false;
-	HttpHandle request(WinHttpOpenRequest(connection, L"GET", requestPath.c_str(), nullptr,
-					    WINHTTP_NO_REFERER, WINHTTP_DEFAULT_ACCEPT_TYPES, WINHTTP_FLAG_SECURE));
-	if (!request || !WinHttpSendRequest(request, WINHTTP_NO_ADDITIONAL_HEADERS, 0,
-					    WINHTTP_NO_REQUEST_DATA, 0, 0, 0) || cancelled ||
-	    !WinHttpReceiveResponse(request, nullptr))
-		return false;
-	DWORD status = 0;
-	DWORD n = sizeof(status);
-	if (!WinHttpQueryHeaders(request, WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER,
-				 WINHTTP_HEADER_NAME_BY_INDEX, &status, &n, WINHTTP_NO_HEADER_INDEX) || status != 200)
-		return false;
-
-	body.clear();
-	for (;;) {
-		if (cancelled)
+	const fs::path part = dest.wstring() + L".part";
+	bool ok = false;
+	{
+		std::ofstream out(part, std::ios::binary | std::ios::trunc);
+		if (!out)
 			return false;
-		DWORD available = 0;
-		if (!WinHttpQueryDataAvailable(request, &available))
-			return false;
-		if (!available)
-			return true;
-		if (available > cap || body.size() > cap - available)
-			return false;
-		const size_t previous = body.size();
-		body.resize(previous + available);
-		DWORD received = 0;
-		if (!WinHttpReadData(request, body.data() + previous, available, &received) || received == 0)
-			return false;
-		body.resize(previous + received);
+		std::string head;
+		size_t written = 0;
+		HttpGet req = cdnRequest(url, cap);
+		req.sink = [&](const char *data, size_t n) {
+			if (head.size() < 8)
+				head.append(data, std::min(n, 8 - head.size()));
+			if (head.size() >= 8 && head.compare(4, 4, "ftyp") != 0)
+				return false; // HTML, an error page or a mislabeled file: stop early
+			out.write(data, static_cast<std::streamsize>(n));
+			written += n;
+			return out.good();
+		};
+		const HttpResult r = httpGet(req, cancelled);
+		out.flush();
+		ok = r.ok && out.good() && written >= minBytes && head.size() >= 8 && head.compare(4, 4, "ftyp") == 0;
 	}
+	std::error_code ec;
+	if (ok) {
+		fs::rename(part, dest, ec);
+		ok = !ec;
+	}
+	if (!ok)
+		fs::remove(part, ec);
+	return ok;
 }
 
 std::vector<std::string> lines(const std::string &s)
@@ -204,6 +195,43 @@ std::optional<std::string> quotedUri(const std::string &tag)
 	return tag.substr(start, end - start);
 }
 
+// Reads a decimal attribute value such as BANDWIDTH=123 with a checked conversion.
+bool parseAttributeInt(const std::string &line, const char *name, int &value)
+{
+	const size_t pos = line.find(name);
+	if (pos == std::string::npos)
+		return false;
+	const char *begin = line.data() + pos + std::strlen(name);
+	const char *end = line.data() + line.size();
+	int v = 0;
+	const auto r = std::from_chars(begin, end, v);
+	if (r.ec != std::errc() || r.ptr == begin)
+		return false;
+	value = v;
+	return true;
+}
+
+// RESOLUTION=<width>x<height>
+bool parseResolution(const std::string &line, int &width, int &height)
+{
+	const size_t pos = line.find("RESOLUTION=");
+	if (pos == std::string::npos)
+		return false;
+	const char *p = line.data() + pos + 11;
+	const char *end = line.data() + line.size();
+	int w = 0, h = 0;
+	auto r = std::from_chars(p, end, w);
+	if (r.ec != std::errc() || r.ptr == p || r.ptr == end || *r.ptr != 'x')
+		return false;
+	p = r.ptr + 1;
+	r = std::from_chars(p, end, h);
+	if (r.ec != std::errc() || r.ptr == p)
+		return false;
+	width = w;
+	height = h;
+	return true;
+}
+
 std::vector<std::string> chooseMediaPlaylists(const std::string &master, const std::string &url, MotionQuality quality)
 {
 	struct Variant {
@@ -227,12 +255,9 @@ std::vector<std::string> chooseMediaPlaylists(const std::string &master, const s
 		if (!next)
 			continue;
 		int width = 0, height = 0, bitrate = 0;
-		auto pos = line.find("RESOLUTION=");
-		if (pos != std::string::npos)
-			sscanf_s(line.c_str() + pos, "RESOLUTION=%dx%d", &width, &height);
-		pos = line.find("BANDWIDTH=");
-		if (pos != std::string::npos)
-			sscanf_s(line.c_str() + pos, "BANDWIDTH=%d", &bitrate);
+		if (!parseResolution(line, width, height))
+			continue; // a variant without a readable size can't be checked against the limit
+		parseAttributeInt(line, "BANDWIDTH=", bitrate);
 		const int limit = quality == MotionQuality::Maximum ? 2160 : 1080;
 		if (width < 1 || height < 1 || width > limit || height > limit)
 			continue;
@@ -339,18 +364,13 @@ std::optional<std::string> cacheSingleMp4(const std::string &media, const std::s
 	    extensionFor(*sameFile) != ".mp4")
 		return std::nullopt;
 
-	std::string mp4;
-	if (!fetch(*sameFile, kMaxEntireAlbum, mp4, cancelled)) {
-		cacheTrace("failed to download single Apple MP4");
+	// Streamed to disk in chunks (up to 100 MB). fMP4 video starts with an ISO BMFF
+	// file-type box; HTML, an error response or a mislabeled binary is not cached.
+	if (!fetchMp4ToFile(*sameFile, kMaxEntireAlbum, 4096, dir / L"artwork.mp4", cancelled)) {
+		cacheTrace("failed to download single Apple MP4 (or it was not an MP4)");
 		return std::nullopt;
 	}
-	// fMP4 video starts with an ISO BMFF file-type box; do not cache HTML,
-	// an error response, or a random binary mislabeled as an MP4.
-	if (mp4.size() < 4096 || mp4.compare(4, 4, "ftyp") != 0) {
-		cacheTrace("single Apple MP4 response missing ftyp");
-		return std::nullopt;
-	}
-	if (!save(dir / L"artwork.mp4", mp4) || !save(dir / L".complete", "1"))
+	if (!save(dir / L".complete", "1"))
 		return std::nullopt;
 	cacheTrace("cached entire finite Apple MP4");
 	return utf8Path(dir / L"artwork.mp4");
@@ -390,7 +410,7 @@ std::optional<std::string> createCache(const std::string &media, const std::stri
 				return std::nullopt;
 			total += data.size();
 			std::string local = "init" + extensionFor(*remote);
-			if (!save(dir / fs::u8path(local), data))
+			if (!save(dir / fromUtf8(local), data))
 				return std::nullopt;
 			std::string changed = row;
 			changed.replace(changed.find("URI=\"") + 5, name->size(), local);
@@ -413,7 +433,7 @@ std::optional<std::string> createCache(const std::string &media, const std::stri
 			total += data.size();
 			std::ostringstream name;
 			name << "segment-" << std::setfill('0') << std::setw(3) << count << extensionFor(*remote);
-			if (!save(dir / fs::u8path(name.str()), data))
+			if (!save(dir / fromUtf8(name.str()), data))
 				return std::nullopt;
 			rewritten += name.str() + "\n";
 			sawVideo = true;
@@ -470,10 +490,15 @@ std::optional<std::string> cacheMotionHls(const std::string &playlistUrl, const 
 	std::unique_lock<std::timed_mutex> locked(*albumLock, std::adopt_lock);
 	if (cancelled)
 		return std::nullopt; // RAII unlocks even when cancellation races acquisition.
+	// Keeps this entry (finished or still downloading) out of cache eviction for as
+	// long as this call runs; the player takes its own lease once it loads the video.
+	const std::string keyUtf8(key.begin(), key.end()); // hex digits only
+	MotionCacheLeases::Lease lease(MotionCacheLeases::shared(), keyUtf8);
 	const fs::path finished = root / key;
 	const fs::path mp4Dest = finished / L"artwork.mp4";
 	const fs::path playlistDest = finished / L"artwork.m3u8";
 	if (fs::exists(finished / L".complete", ec)) {
+		touchMotionCacheEntry(finished);
 		if (fs::exists(mp4Dest, ec))
 			return utf8Path(mp4Dest);
 		if (fs::exists(playlistDest, ec))

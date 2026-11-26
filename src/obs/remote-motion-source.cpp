@@ -12,8 +12,13 @@
 #include <windows.h>
 #include <winhttp.h>
 
+#include "http-client.hpp"
+#include "media/net_policy.hpp"
+
 #include <algorithm>
 #include <cctype>
+#include <chrono>
+#include <set>
 #include <cstdint>
 #include <memory>
 #include <string>
@@ -22,15 +27,17 @@
 namespace tonearm {
 namespace {
 
-struct HttpHandle {
-	HINTERNET handle = nullptr;
-	explicit HttpHandle(HINTERNET value) : handle(value) {}
-	~HttpHandle() { if (handle) WinHttpCloseHandle(handle); }
-	HttpHandle(const HttpHandle &) = delete;
-	HttpHandle &operator=(const HttpHandle &) = delete;
-	explicit operator bool() const { return handle != nullptr; }
-	operator HINTERNET() const { return handle; }
-};
+constexpr const char *kArtworkHost = "artwork.m8tec.top";
+
+// After a new video lands in the cache, keep the whole cache within its budget.
+void enforceCacheBudget()
+{
+	const CachePruneResult r = pruneMotionCacheNow();
+	if (r.evicted || r.staleRemoved || r.indexRemoved || r.overBudget)
+		blog(LOG_INFO, "[tonearm] motion cache %.1f MB -> %.1f MB (budget %.0f MB): %d evicted, %d stale removed, %d index entries removed%s",
+		     r.bytesBefore / 1048576.0, r.bytesAfter / 1048576.0, kDefaultMotionCacheBudget / 1048576.0, r.evicted,
+		     r.staleRemoved, r.indexRemoved, r.overBudget ? "; still over budget because entries are in use" : "");
+}
 
 std::string percentEncode(const std::string &text)
 {
@@ -50,86 +57,46 @@ std::string percentEncode(const std::string &text)
 }
 
 // Don't allow a network service to feed arbitrary local files or unrelated URLs
-// into OBS's FFmpeg decoder.
+// into OBS's FFmpeg decoder: only https URLs on Apple's media CDNs.
 bool trustedVideoUrl(const std::string &url)
 {
-	if (url.size() < 12 || url.size() > 4096 || url.compare(0, 8, "https://") != 0)
-		return false;
-	const size_t stop = url.find_first_of("/?#", 8);
-	std::string hostname = url.substr(8, stop == std::string::npos ? std::string::npos : stop - 8);
-	if (hostname.empty() || hostname.find_first_of("@:\\") != std::string::npos)
-		return false;
-	std::transform(hostname.begin(), hostname.end(), hostname.begin(),
-		       [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-	auto allowed = [&](const std::string &domain) {
-		return hostname == domain ||
-		       (hostname.size() > domain.size() &&
-			hostname.compare(hostname.size() - domain.size(), domain.size(), domain) == 0 &&
-			hostname[hostname.size() - domain.size() - 1] == '.');
-	};
-	return allowed("apple.com") || allowed("mzstatic.com");
+	return trustedAppleMediaUrl(url);
 }
 
-std::string getJson(const wchar_t *hostname, const std::string &path,
-		    const std::atomic<bool> &cancelled, DWORD *responseStatus)
+// GET a small JSON document from one of the two lookup services. Redirects are
+// followed only to the same host. Every outcome feeds the shared per-host backoff,
+// and while a host is cooling down after an outage no request is sent at all.
+std::string getJson(const std::string &host, const std::string &path, const std::atomic<bool> &cancelled,
+		    DWORD *responseStatus)
 {
 	if (responseStatus)
 		*responseStatus = 0;
+	if (cancelled || !EndpointBackoff::shared().allowed(host))
+		return {};
+	HttpGet req;
+	req.url = "https://" + host + path;
+	req.allowUrl = [host](const std::string &url) {
+		const auto parsed = parseHttpsUrl(url);
+		return parsed && parsed->host == host;
+	};
+	req.headers = L"Accept: application/json\r\n";
+	// Exact soundtrack verification may use an album's complete track
+	// listing, which is larger than the artwork service's small JSON.
+	req.cap = host == "itunes.apple.com" ? 512 * 1024 : 65536;
+	req.resolveMs = req.connectMs = 2500;
+	req.sendMs = req.receiveMs = 4500;
+	const HttpResult r = httpGet(req, cancelled);
 	if (cancelled)
 		return {};
-	const std::wstring widePath(path.begin(), path.end());
-
-	HttpHandle session(WinHttpOpen(L"Tonearm/0.2 (OBS Studio)", WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY,
-				      WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0));
-	if (!session)
-		return {};
-	// A failed service must never leave the plugin stuck or block the graphics thread.
-	WinHttpSetTimeouts(session, 2500, 2500, 4500, 4500);
-	HttpHandle connection(WinHttpConnect(session, hostname, INTERNET_DEFAULT_HTTPS_PORT, 0));
-	if (!connection || cancelled)
-		return {};
-	HttpHandle request(WinHttpOpenRequest(connection, L"GET", widePath.c_str(), nullptr, WINHTTP_NO_REFERER,
-					    WINHTTP_DEFAULT_ACCEPT_TYPES, WINHTTP_FLAG_SECURE));
-	if (!request || cancelled)
-		return {};
-	if (!WinHttpSendRequest(request, L"Accept: application/json\r\n", static_cast<DWORD>(-1),
-				WINHTTP_NO_REQUEST_DATA, 0, 0, 0) || cancelled)
-		return {};
-	if (!WinHttpReceiveResponse(request, nullptr) || cancelled)
-		return {};
-	DWORD status = 0, size = sizeof(status);
-	if (!WinHttpQueryHeaders(request, WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER,
-				 WINHTTP_HEADER_NAME_BY_INDEX, &status, &size, WINHTTP_NO_HEADER_INDEX))
-		return {};
+	if (r.rejected)
+		blog(LOG_WARNING, "[tonearm] refused a redirect away from %s", host.c_str());
+	else if (EndpointBackoff::shared().record(host, r.status, r.retryAfter))
+		blog(LOG_INFO, "[tonearm] %s unavailable (HTTP %u); pausing lookups for %lld s", host.c_str(), r.status,
+		     static_cast<long long>(std::chrono::duration_cast<std::chrono::seconds>(
+						    EndpointBackoff::shared().remaining(host)).count()));
 	if (responseStatus)
-		*responseStatus = status;
-	if (status != 200)
-		return {};
-
-	std::string body;
-	for (;;) {
-		if (cancelled)
-			return {};
-		DWORD available = 0;
-		if (!WinHttpQueryDataAvailable(request, &available))
-			return {};
-		if (available == 0)
-			break;
-		// Exact soundtrack verification may use an album's complete track
-		// listing, which is larger than the artwork service's small JSON.
-		const size_t responseCap = (std::wstring(hostname) == L"itunes.apple.com")
-						? 512 * 1024 : 65536;
-		if (available > responseCap || body.size() > responseCap - available)
-			return {};
-		std::string chunk(available, '\0');
-		DWORD read = 0;
-		if (!WinHttpReadData(request, chunk.data(), available, &read))
-			return {};
-		if (!read)
-			break;
-		body.append(chunk.data(), read);
-	}
-	return body;
+		*responseStatus = r.status;
+	return r.ok ? r.body : std::string();
 }
 
 std::string getArtworkJson(const std::string &artist, const std::string &album,
@@ -137,7 +104,7 @@ std::string getArtworkJson(const std::string &artist, const std::string &album,
 {
 	const std::string path = "/api/v1/artwork/search?artist=" + percentEncode(artist) +
 				 "&album=" + percentEncode(album);
-	return getJson(L"artwork.m8tec.top", path, cancelled, responseStatus);
+	return getJson(kArtworkHost, path, cancelled, responseStatus);
 }
 
 // Track performers and soundtrack composers often differ (e.g. Halle versus
@@ -154,7 +121,7 @@ bool verifySoundtrackPerformer(const MotionQuery &q, const std::string &motionAr
 	DWORD status = 0;
 	const std::string catalogPath = "/search?term=" + percentEncode(q.album) +
 					"&entity=album&country=US&limit=35";
-	const std::string jsonText = getJson(L"itunes.apple.com", catalogPath, cancelled, &status);
+	const std::string jsonText = getJson("itunes.apple.com", catalogPath, cancelled, &status);
 	if (status != 200 || jsonText.empty() || cancelled)
 		return false;
 	obs_data_t *root = obs_data_create_from_json(jsonText.c_str());
@@ -189,7 +156,7 @@ bool verifySoundtrackPerformer(const MotionQuery &q, const std::string &motionAr
 			return false;
 		const auto path = "/lookup?id=" + std::to_string(album.id) + "&entity=song&limit=200";
 		status = 0;
-		const std::string tracks = getJson(L"itunes.apple.com", path, cancelled, &status);
+		const std::string tracks = getJson("itunes.apple.com", path, cancelled, &status);
 		if (status != 200 || tracks.empty() || cancelled)
 			continue;
 		obs_data_t *catalog = obs_data_create_from_json(tracks.c_str());
@@ -225,7 +192,8 @@ bool verifySoundtrackPerformer(const MotionQuery &q, const std::string &motionAr
 // incorrectly return 404 for real albums. Public iTunes Search can identify
 // their catalog IDs without any Apple Music session credentials; the independent
 // artwork service also exposes an album-URL lookup route.
-std::optional<MotionAsset> resolveWithCatalogId(const MotionQuery &q, const std::atomic<bool> &cancelled)
+std::optional<MotionAsset> resolveWithCatalogId(const MotionQuery &q, const std::atomic<bool> &cancelled,
+						std::set<std::string> &failedUrls)
 {
 	struct Candidate {
 		std::uint64_t id;
@@ -236,7 +204,7 @@ std::optional<MotionAsset> resolveWithCatalogId(const MotionQuery &q, const std:
 		const std::string term = q.artist + " " + album;
 		const std::string path = "/search?term=" + percentEncode(term) + "&entity=album&country=US&limit=25";
 		DWORD status = 0;
-		const std::string jsonText = getJson(L"itunes.apple.com", path, cancelled, &status);
+		const std::string jsonText = getJson("itunes.apple.com", path, cancelled, &status);
 		if (status != 200 || jsonText.empty() || cancelled)
 			return;
 		obs_data_t *root = obs_data_create_from_json(jsonText.c_str());
@@ -283,8 +251,8 @@ std::optional<MotionAsset> resolveWithCatalogId(const MotionQuery &q, const std:
 		const std::string publicUrl = "https://music.apple.com/album/" + std::to_string(candidate.id);
 		const std::string path = "/api/v1/artwork/url?url=" + percentEncode(publicUrl);
 		DWORD status = 0;
-		const auto body = getJson(L"artwork.m8tec.top", path, cancelled, &status);
-		if (cancelled || status == 429 || status == 503 || status == 0)
+		const auto body = getJson(kArtworkHost, path, cancelled, &status);
+		if (cancelled || EndpointBackoff::isOutageStatus(status))
 			break;
 		if (body.empty())
 			continue;
@@ -306,13 +274,21 @@ std::optional<MotionAsset> resolveWithCatalogId(const MotionQuery &q, const std:
 					   trustedVideoUrl(square) ? square : trustedVideoUrl(tall) ? tall : "";
 		if (chosen.empty())
 			continue;
+		if (failedUrls.count(chosen)) {
+			// The search above already tried this exact video and it failed; this
+			// candidate has nothing new to offer, but a different one still might.
+			blog(LOG_INFO, "[tonearm] skipping a motion video that already failed in this lookup");
+			continue;
+		}
 		auto cached = cacheMotionHls(chosen, cancelled, q.quality);
 		if (cached) {
 			blog(LOG_INFO, "[tonearm] animated artwork found via public album ID fallback");
 			MotionAsset asset{*cached, chosen == tall ? MotionShape::Portrait : MotionShape::Square};
 			rememberMotionForAlbum(q, asset);
+			enforceCacheBudget();
 			return asset;
 		}
+		failedUrls.insert(chosen);
 		break; // Avoid downloading the same failed source multiple times.
 	}
 	return std::nullopt;
@@ -329,6 +305,13 @@ std::optional<MotionAsset> RemoteArtworkApiSource::resolve(const MotionQuery &q,
 	if (auto indexed = cachedMotionForAlbum(q)) {
 		blog(LOG_INFO, "[tonearm] instant animated album cache hit");
 		return indexed;
+	}
+
+	// While the lookup service is cooling down after an outage, don't send anything.
+	// The catalog fallback below also goes through it, so it would fail the same way.
+	if (!EndpointBackoff::shared().allowed(kArtworkHost)) {
+		blog(LOG_INFO, "[tonearm] motion lookup paused after a service outage; using still cover");
+		return std::nullopt;
 	}
 
 	struct Lookup {
@@ -361,6 +344,8 @@ std::optional<MotionAsset> RemoteArtworkApiSource::resolve(const MotionQuery &q,
 		add(performerKeys.back(), base.empty() ? q.album : base);
 
 	size_t checked = 0;
+	bool outage = false;
+	std::set<std::string> failedUrls; // videos that failed to download in this lookup
 	for (const auto &search : attempts) {
 		if (cancelled)
 			return std::nullopt;
@@ -369,9 +354,10 @@ std::optional<MotionAsset> RemoteArtworkApiSource::resolve(const MotionQuery &q,
 		const std::string body = getArtworkJson(search.artist, search.album, cancelled, &status);
 		if (cancelled)
 			return std::nullopt;
-		if (status == 429 || status == 503 || status == 0) {
+		if (EndpointBackoff::isOutageStatus(status)) {
 			blog(LOG_INFO, "[tonearm] motion lookup temporarily unavailable (HTTP %lu); using still cover",
 			     static_cast<unsigned long>(status));
+			outage = true;
 			break; // Respect provider rate limits and transient failures.
 		}
 		if (body.empty())
@@ -394,7 +380,7 @@ std::optional<MotionAsset> RemoteArtworkApiSource::resolve(const MotionQuery &q,
 		const bool portrait = q.preferred == MotionShape::Portrait;
 		const std::string chosen = portrait && trustedVideoUrl(tall) ? tall :
 					   trustedVideoUrl(square) ? square : trustedVideoUrl(tall) ? tall : "";
-		if (chosen.empty())
+		if (chosen.empty() || failedUrls.count(chosen))
 			continue;
 		auto cached = cacheMotionHls(chosen, cancelled, q.quality);
 		if (cached) {
@@ -402,16 +388,18 @@ std::optional<MotionAsset> RemoteArtworkApiSource::resolve(const MotionQuery &q,
 			     checked, attempts.size(), q.quality == MotionQuality::Maximum ? "maximum" : "balanced");
 			MotionAsset asset{*cached, chosen == tall ? MotionShape::Portrait : MotionShape::Square};
 			rememberMotionForAlbum(q, asset);
+			enforceCacheBudget();
 			return asset;
 		}
 		if (!cancelled)
 			blog(LOG_WARNING, "[tonearm] motion URL found but video cache/decoder preparation failed");
+		failedUrls.insert(chosen);
 		// Alternate artist spellings for this same album won't repair a broken
 		// video URL. Don't repeatedly download the same large asset.
 		break;
 	}
-	if (!cancelled) {
-		const auto catalog = resolveWithCatalogId(q, cancelled);
+	if (!cancelled && !outage) {
+		const auto catalog = resolveWithCatalogId(q, cancelled, failedUrls);
 		if (catalog)
 			return catalog;
 	}

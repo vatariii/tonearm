@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <filesystem>
 
 namespace tonearm {
 
@@ -36,6 +37,7 @@ void MotionPlayer::teardown()
 		child_ = nullptr;
 		loadedIdentity_.clear();
 		loadedPath_.clear();
+		loadedLease_ = {};
 		lastMissAt_ = {};
 		wantedSerial_ = 0;
 		wantedIdentity_.clear();
@@ -141,6 +143,7 @@ void MotionPlayer::deliver(uint64_t serial, const std::optional<MotionAsset> &as
 		if (serial == wantedSerial_)
 			lastMissAt_ = std::chrono::steady_clock::now();
 		loadedPath_.clear();
+		loadedLease_ = {};
 	} else if (samePath) {
 		// Same video (another track of the same album): keep it running seamlessly.
 		std::lock_guard<std::mutex> lock(mutex_);
@@ -165,6 +168,9 @@ void MotionPlayer::deliver(uint64_t serial, const std::optional<MotionAsset> &as
 		obs_data_release(settings);
 		std::lock_guard<std::mutex> lock(mutex_);
 		loadedPath_ = asset->location;
+		loadedLease_ = MotionCacheLeases::Lease(
+			MotionCacheLeases::shared(),
+			motionCacheKeyForPath(std::filesystem::path(std::u8string(asset->location.begin(), asset->location.end()))));
 		if (serial == wantedSerial_) {
 			loadedIdentity_ = identity;
 			lastMissAt_ = {};

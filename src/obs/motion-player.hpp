@@ -14,6 +14,7 @@
 
 #include "core/motion.hpp"
 #include "core/scene.hpp"
+#include "media/cache_budget.hpp"
 #include "media/motion_resolver.hpp"
 
 #include <obs.h>
@@ -77,6 +78,7 @@ private:
 	std::string wantedIdentity_;
 	std::string loadedIdentity_; // identity whose video is loaded in the child
 	std::string loadedPath_;
+	MotionCacheLeases::Lease loadedLease_; // keeps the loaded cached video out of eviction
 	std::chrono::steady_clock::time_point lastMissAt_{}; // guarded by mutex_, bounded retry for failed lookups
 	std::atomic<uint64_t> loadGeneration_{0};
 	// Bumped by configure() (UI thread) after a new child and resolver exist. The

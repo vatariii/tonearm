@@ -3,6 +3,9 @@
 
 #include "core/image.hpp"
 
+#include <cmath>
+#include <set>
+
 using namespace tonearm;
 
 namespace {
@@ -115,4 +118,28 @@ TEST("image: drop shadow and glow stay premultiplied")
 	dot.fill(Color::hex("#ffffff"));
 	glow(img, dot, 55, 35, 8, Color::hex("#ff00ff"), 0.8f);
 	CHECK(premultipliedValid(img));
+}
+
+TEST("image: fill clamps out-of-range and non-finite channels (audit L-3)")
+{
+	Image img(2, 1);
+	img.fill(Color{1.5f, -0.2f, std::nanf(""), 2.0f});
+	const uint8_t *p = img.row(0);
+	CHECK(p[2] == 255); // red clamped to 1, not wrapped
+	CHECK(p[1] == 0);   // green clamped to 0
+	CHECK(p[0] == 0);   // NaN blue becomes 0
+	CHECK(p[3] == 255); // alpha clamped to 1
+	img.fill(Color{0.5f, 0.5f, 0.5f, -1.0f});
+	CHECK(img.row(0)[3] == 0 && img.row(0)[2] == 0);
+}
+
+TEST("image: noise with a zero seed is still noise (audit L-1)")
+{
+	Image img(32, 8);
+	img.fill(Color{0.5f, 0.5f, 0.5f, 1});
+	addNoise(img, 0.1f, 0);
+	std::set<int> values;
+	for (int x = 0; x < img.width(); ++x)
+		values.insert(img.row(3)[x * 4 + 2]);
+	CHECK(values.size() > 4); // not one constant offset
 }
