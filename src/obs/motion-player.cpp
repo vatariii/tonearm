@@ -101,7 +101,9 @@ void MotionPlayer::configure(const Style &style)
 		child_ = child;
 		resolver_ = std::move(resolver);
 	}
-	requestedKey_.clear(); // graphics thread re-requests the current track
+	// The graphics thread notices the new generation and re-requests the current track.
+	// requestedKey_ itself belongs to the graphics thread and is never written here.
+	configureGeneration_.fetch_add(1);
 	enabled_ = true;
 	blog(LOG_INFO, "[tonearm] animated artwork on (%s)", folder_.empty() ? "online lookup" : "local folder");
 }
@@ -183,6 +185,11 @@ void MotionPlayer::tick(const MediaSession *session, bool showing, MotionShape p
 	obs_source_t *child = childRef();
 	if (!child)
 		return;
+	const uint64_t configured = configureGeneration_.load();
+	if (configured != seenConfigureGeneration_) {
+		seenConfigureGeneration_ = configured;
+		requestedKey_.clear(); // a new resolver: ask again for the current track
+	}
 
 	// New track (or new preferred shape): ask the resolver. It cancels older work.
 	if (session && session->track.hasMetadata()) {
@@ -301,10 +308,20 @@ MotionFrame MotionPlayer::frame() const
 	return f;
 }
 
+void MotionPlayer::releaseGraphics()
+{
+	haveTexture_ = false;
+	if (texrender_) {
+		gs_texrender_destroy(texrender_);
+		texrender_ = nullptr;
+		texW_ = texH_ = 0;
+	}
+}
+
 gs_texture_t *MotionPlayer::prepare(const std::vector<DrawOp> &ops, const Rect &box, double t)
 {
 	if (!enabled_) {
-		haveTexture_ = false;
+		releaseGraphics();
 		return nullptr;
 	}
 	// Only copy frames while a video is loaded for the shown track. The scene asks for
@@ -372,8 +389,14 @@ gs_texture_t *MotionPlayer::prepare(const std::vector<DrawOp> &ops, const Rect &
 	}
 	// Before the first frame is shown, capture once so the scene can start fading in;
 	// after that, copy only while the video is drawn, up to 60 times a second.
+	// A paused decoder keeps presenting the same frame, so once that frame has been
+	// copied at the current size there is nothing new to capture until playback resumes,
+	// the size changes or another video loads (the generation check above).
+	const bool pausedFrameHeld = haveTexture_ && !sizeChanged && gen == capturedGeneration_ &&
+				     capturedWhilePaused_ && obs_source_media_get_state(child) == OBS_MEDIA_STATE_PAUSED;
 	const bool due = !haveTexture_ ||
-			 (wanted && (sizeChanged || shouldCaptureMotionFrame(t, lastCapture_, kMaxCaptureFps) || t < lastCapture_));
+			 (wanted && !pausedFrameHeld &&
+			  (sizeChanged || shouldCaptureMotionFrame(t, lastCapture_, kMaxCaptureFps) || t < lastCapture_));
 	if (due) {
 		if (!texrender_)
 			texrender_ = gs_texrender_create(GS_RGBA, GS_ZS_NONE);
@@ -399,6 +422,7 @@ gs_texture_t *MotionPlayer::prepare(const std::vector<DrawOp> &ops, const Rect &
 			lastCapture_ = t;
 			haveTexture_ = true;
 			capturedGeneration_ = gen;
+			capturedWhilePaused_ = obs_source_media_get_state(child) == OBS_MEDIA_STATE_PAUSED;
 			if (wanted) {
 				if (captureReportStart_ < 0.0)
 					captureReportStart_ = t;

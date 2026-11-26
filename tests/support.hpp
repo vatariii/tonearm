@@ -5,6 +5,8 @@
 
 #include <filesystem>
 #include <memory>
+#include <string>
+#include <vector>
 
 namespace testsupport {
 
@@ -15,11 +17,13 @@ inline tonearm::TextEngine &text()
 		auto e = tonearm::createTextEngine();
 		const std::filesystem::path dir = std::filesystem::path(TONEARM_DATA_DIR) / "fonts";
 		std::error_code ec;
+		std::vector<std::string> fonts;
 		for (const auto &f : std::filesystem::directory_iterator(dir, ec)) {
 			const auto ext = f.path().extension().string();
 			if (ext == ".otf" || ext == ".ttf")
-				e->addFontFile(f.path().string());
+				fonts.push_back(f.path().string());
 		}
+		e->addFontFiles(fonts); // the batch path the plugin uses
 		return e;
 	}();
 	return *engine;

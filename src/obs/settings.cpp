@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 #include "settings.hpp"
+#include "media-service.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -12,6 +13,8 @@ namespace tonearm {
 namespace {
 
 // Keys that make up the look of a source. Exported presets contain only these.
+constexpr long long kPresetFormatVersion = 1;
+
 const char *kStyleKeys[] = {
 	"preset", "layout", "width", "height", "corner_radius", "surface_opacity", "shadow", "blur", "border", "glow",
 	"show_artwork", "show_album", "show_progress", "time_display", "show_source_app", "accent_mode", "accent_color",
@@ -147,10 +150,16 @@ bool onToggles(void *, obs_properties_t *props, obs_property_t *, obs_data_t *se
 	return true;
 }
 
+// The buttons below act on one source. OBS can also ask for properties without a
+// source (getProperties(nullptr), e.g. for defaults), and then there is nothing to act on.
 bool onResetSize(obs_properties_t *, obs_property_t *, void *priv)
 {
 	auto *ctx = static_cast<PropertiesContext *>(priv);
+	if (!ctx || !ctx->source)
+		return false;
 	obs_data_t *s = obs_source_get_settings(ctx->source);
+	if (!s)
+		return false;
 	int w = 0, h = 0;
 	const Style st = makePreset(obs_data_get_string(s, "preset"), layoutFromId(obs_data_get_string(s, "layout")));
 	w = st.width;
@@ -165,7 +174,11 @@ bool onResetSize(obs_properties_t *, obs_property_t *, void *priv)
 bool onExport(obs_properties_t *, obs_property_t *, void *priv)
 {
 	auto *ctx = static_cast<PropertiesContext *>(priv);
+	if (!ctx || !ctx->source)
+		return false;
 	obs_data_t *s = obs_source_get_settings(ctx->source);
+	if (!s)
+		return false;
 	const char *path = obs_data_get_string(s, "export_path");
 	if (path && *path) {
 		if (exportPreset(s, path))
@@ -180,7 +193,11 @@ bool onExport(obs_properties_t *, obs_property_t *, void *priv)
 bool onImport(obs_properties_t *, obs_property_t *, void *priv)
 {
 	auto *ctx = static_cast<PropertiesContext *>(priv);
+	if (!ctx || !ctx->source)
+		return false;
 	obs_data_t *s = obs_source_get_settings(ctx->source);
+	if (!s)
+		return false;
 	const char *path = obs_data_get_string(s, "import_path");
 	bool changed = false;
 	if (path && *path) {
@@ -196,12 +213,39 @@ bool onImport(obs_properties_t *, obs_property_t *, void *priv)
 	return changed;
 }
 
-bool onRefresh(obs_properties_t *, obs_property_t *, void *)
+bool onRefresh(obs_properties_t *props, obs_property_t *, void *priv)
 {
-	return true; // rebuilds the properties, which re-reads detected players
+	// Returning true only redraws the existing properties; it does not call
+	// get_properties again. Read the shared media service now and update the label.
+	const std::string summary = detectedPlayersSummary();
+	if (auto *ctx = static_cast<PropertiesContext *>(priv))
+		ctx->detectedSummary = summary;
+	if (obs_property_t *p = obs_properties_get(root(props), "detected"))
+		obs_property_set_description(p, summary.c_str());
+	return true;
 }
 
 } // namespace
+
+std::string detectedPlayersSummary()
+{
+	const auto snap = MediaService::instance().snapshot();
+	if (!snap || snap->state == ProviderState::Unavailable)
+		return T_("Detected.Unavailable");
+	if (snap->sessions.empty())
+		return T_("Detected.None");
+	std::string summary = T_("Detected.Prefix");
+	for (size_t i = 0; i < snap->sessions.size(); ++i) {
+		const MediaSession &m = snap->sessions[i];
+		summary += i ? ", " : " ";
+		summary += m.appName;
+		if (m.status == PlaybackStatus::Playing)
+			summary += std::string(" (") + T_("Detected.Playing") + ")";
+		else if (m.status == PlaybackStatus::Paused)
+			summary += std::string(" (") + T_("Detected.Paused") + ")";
+	}
+	return summary;
+}
 
 void applyPreset(obs_data_t *settings, const std::string &preset, const std::string &layout, bool resetSize)
 {
@@ -209,6 +253,26 @@ void applyPreset(obs_data_t *settings, const std::string &preset, const std::str
 	writeStyle(settings, s, resetSize);
 	obs_data_set_string(settings, "applied_preset", preset.c_str());
 	obs_data_set_string(settings, "applied_layout", layout.c_str());
+}
+
+bool migrateSettings(obs_data_t *settings)
+{
+	// Scene collections written before applied_preset/applied_layout existed, or edited
+	// by hand or by a script, can hold a preset and layout with the user's own colors and
+	// fonts but no record of what was applied. Their defaults ("glass"/"expanded") would
+	// make syncPreset() think the preset just changed and overwrite those values. The
+	// saved preset and layout are what the user's values belong to, so record them as
+	// applied. A new source has no saved preset either, and then nothing changes.
+	bool changed = false;
+	if (!obs_data_has_user_value(settings, "applied_preset") && obs_data_has_user_value(settings, "preset")) {
+		obs_data_set_string(settings, "applied_preset", obs_data_get_string(settings, "preset"));
+		changed = true;
+	}
+	if (!obs_data_has_user_value(settings, "applied_layout") && obs_data_has_user_value(settings, "layout")) {
+		obs_data_set_string(settings, "applied_layout", obs_data_get_string(settings, "layout"));
+		changed = true;
+	}
+	return changed;
 }
 
 bool syncPreset(obs_data_t *settings)
@@ -378,7 +442,7 @@ bool exportPreset(obs_data_t *settings, const char *path)
 {
 	obs_data_t *out = obs_data_create();
 	obs_data_set_string(out, "format", "tonearm-preset");
-	obs_data_set_int(out, "version", 1);
+	obs_data_set_int(out, "version", kPresetFormatVersion);
 	obs_data_t *values = obs_data_create();
 	for (const char *k : kStyleKeys) {
 		obs_data_item_t *item = obs_data_item_byname(settings, k);
@@ -419,12 +483,60 @@ bool importPreset(obs_data_t *settings, const char *path, std::string &error)
 		error = "the file is not a Tonearm preset";
 		return false;
 	}
+	// Version 1 is the only format written so far. Files without a version predate it
+	// and share its layout. A newer version may mean something else, so refuse it
+	// rather than guess.
+	if (obs_data_has_user_value(in, "version")) {
+		const long long version = obs_data_get_int(in, "version");
+		if (version < 1 || version > kPresetFormatVersion) {
+			obs_data_release(in);
+			error = "the preset was made by a newer version of Tonearm (format " + std::to_string(version) + ")";
+			return false;
+		}
+	}
 	obs_data_t *values = obs_data_get_obj(in, "settings");
-	if (values) {
+	if (!values) {
+		obs_data_release(in);
+		error = "the preset has no settings";
+		return false;
+	}
+	// Validate everything before changing the source, so a bad file leaves it as it was.
+	auto knownPreset = [](const char *id) {
+		for (const PresetInfo &p : presetList())
+			if (!strcmp(p.id, id))
+				return true;
+		return false;
+	};
+	if (obs_data_has_user_value(values, "preset") && !knownPreset(obs_data_get_string(values, "preset"))) {
+		error = std::string("unknown preset \"") + obs_data_get_string(values, "preset") + "\"";
+		obs_data_release(values);
+		obs_data_release(in);
+		return false;
+	}
+	if (obs_data_has_user_value(values, "layout")) {
+		const std::string layout = obs_data_get_string(values, "layout");
+		if (layout != "compact" && layout != "expanded" && layout != "square" && layout != "vertical") {
+			error = "unknown layout \"" + layout + "\"";
+			obs_data_release(values);
+			obs_data_release(in);
+			return false;
+		}
+	}
+	{
 		for (const char *k : kStyleKeys) {
 			obs_data_item_t *item = obs_data_item_byname(values, k);
 			if (!item)
 				continue;
+			// Only take a value whose type matches the setting it replaces; ranges are
+			// clamped when the style is read, as for any other settings.
+			obs_data_item_t *mine = obs_data_item_byname(settings, k);
+			const bool sameType = !mine || obs_data_item_gettype(mine) == obs_data_item_gettype(item);
+			obs_data_item_release(&mine);
+			if (!sameType) {
+				blog(LOG_WARNING, "[tonearm] preset import: ignoring %s (wrong type)", k);
+				obs_data_item_release(&item);
+				continue;
+			}
 			switch (obs_data_item_gettype(item)) {
 			case OBS_DATA_STRING:
 				obs_data_set_string(settings, k, obs_data_get_string(values, k));

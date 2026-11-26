@@ -63,6 +63,7 @@ struct TonearmSource {
 	explicit TonearmSource(obs_source_t *src, obs_data_t *settings) : source(src)
 	{
 		props.source = src;
+		migrateSettings(settings); // older or hand-edited scene collections, before anything reads them
 		style = styleFromSettings(settings);
 		policy = policyFromSettings(settings);
 		width = static_cast<uint32_t>(style.width);
@@ -92,6 +93,9 @@ struct TonearmSource {
 			// Generated here (UI thread) so the graphics thread never pays for it.
 			for (int i = 0; i < demoTrackCount(); ++i)
 				sampleTracks.push_back(demoTrack(i, 384, true));
+		} else if (!s.sampleWhenIdle && !sampleTracks.empty()) {
+			sampleTracks.clear(); // about 3 MB of sample artwork nobody will see
+			sampleTracks.shrink_to_fit();
 		}
 		pendingStyle = std::move(s);
 		pendingPolicy = std::move(p);
@@ -198,6 +202,8 @@ struct TonearmSource {
 		if (motion.enabled()) {
 			const auto &layers = scene->currentLayers();
 			video = motion.prepare(ops, layers ? layers->videoMask.box : Rect{}, t);
+		} else {
+			motion.releaseGraphics(); // frees the capture target after animated artwork is switched off
 		}
 		if (!ops.empty())
 			gpu.render(ops, video, motion.videoNeedsSrgbEncode());
@@ -205,25 +211,7 @@ struct TonearmSource {
 
 	obs_properties_t *properties()
 	{
-		const auto snap = MediaService::instance().snapshot();
-		std::string summary;
-		if (snap->state == ProviderState::Unavailable) {
-			summary = T_("Detected.Unavailable");
-		} else if (snap->sessions.empty()) {
-			summary = T_("Detected.None");
-		} else {
-			summary = T_("Detected.Prefix");
-			for (size_t i = 0; i < snap->sessions.size(); ++i) {
-				const MediaSession &m = snap->sessions[i];
-				summary += i ? ", " : " ";
-				summary += m.appName;
-				if (m.status == PlaybackStatus::Playing)
-					summary += std::string(" (") + T_("Detected.Playing") + ")";
-				else if (m.status == PlaybackStatus::Paused)
-					summary += std::string(" (") + T_("Detected.Paused") + ")";
-			}
-		}
-		props.detectedSummary = summary;
+		props.detectedSummary = detectedPlayersSummary();
 		return buildProperties(&props);
 	}
 };

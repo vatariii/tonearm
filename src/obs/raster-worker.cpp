@@ -5,6 +5,7 @@
 #include <util/platform.h>
 #include <util/threading.h>
 
+#include <algorithm>
 #include <filesystem>
 
 namespace tonearm {
@@ -79,13 +80,15 @@ void RasterWorker::run()
 	std::unique_ptr<TextEngine> text = createTextEngine();
 	{
 		std::error_code ec;
+		std::vector<std::string> fonts;
 		for (const auto &e : std::filesystem::directory_iterator(pathFromUtf8(fontDir_), ec)) {
 			const auto ext = e.path().extension().string();
-			if (ext == ".otf" || ext == ".ttf") {
-				if (!text->addFontFile(utf8(e.path())))
-					blog(LOG_WARNING, "[tonearm] could not load font %s", utf8(e.path()).c_str());
-			}
+			if (ext == ".otf" || ext == ".ttf")
+				fonts.push_back(utf8(e.path()));
 		}
+		std::sort(fonts.begin(), fonts.end()); // same registration order on every machine
+		for (const std::string &f : text->addFontFiles(fonts))
+			blog(LOG_WARNING, "[tonearm] could not load font %s", f.c_str());
 	}
 
 	for (;;) {

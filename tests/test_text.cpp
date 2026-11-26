@@ -4,6 +4,8 @@
 #include "support.hpp"
 
 #include <algorithm>
+#include <filesystem>
+#include <vector>
 #include <string>
 
 using namespace tonearm;
@@ -61,4 +63,30 @@ TEST("text: the dot of an i stays apart from its stem at overlay sizes")
 			}
 		}
 	}
+}
+
+TEST("text: batch font registration loads the bundled fonts and reports bad files")
+{
+	auto e = createTextEngine();
+	const std::filesystem::path dir = std::filesystem::path(TONEARM_DATA_DIR) / "fonts";
+	std::vector<std::string> fonts;
+	std::error_code ec;
+	for (const auto &f : std::filesystem::directory_iterator(dir, ec))
+		if (f.path().extension() == ".otf" || f.path().extension() == ".ttf")
+			fonts.push_back(f.path().string());
+	CHECK(!fonts.empty());
+	const std::string bogus = (dir / "does-not-exist.ttf").string();
+	fonts.push_back(bogus);
+	const auto failed = e->addFontFiles(fonts);
+	CHECK(failed.size() == 1 && failed[0] == bogus);
+	const auto fams = e->families();
+	CHECK(std::find(fams.begin(), fams.end(), "Inter") != fams.end());
+	CHECK(std::find(fams.begin(), fams.end(), "EB Garamond") != fams.end());
+	// Two engines alive at once and destroyed in turn (repeated source creation).
+	{
+		auto second = createTextEngine();
+		CHECK(second->addFontFiles({fonts[0]}).empty());
+		CHECK(second->measure("Tonearm", FontSpec{}).width > 0);
+	}
+	CHECK(e->measure("Tonearm", FontSpec{}).width > 0);
 }
