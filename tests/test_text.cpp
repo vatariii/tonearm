@@ -81,7 +81,8 @@ TEST("text: batch font registration loads the bundled fonts and reports bad file
 	CHECK(failed.size() == 1 && failed[0] == bogus);
 	const auto fams = e->families();
 	CHECK(std::find(fams.begin(), fams.end(), "Inter") != fams.end());
-	CHECK(std::find(fams.begin(), fams.end(), "EB Garamond") != fams.end());
+	// DirectWrite lists the bundled Garamond under its legacy family name ("EB Garamond 12").
+	CHECK(std::any_of(fams.begin(), fams.end(), [](const std::string &f) { return f.rfind("EB Garamond", 0) == 0; }));
 	// Two engines alive at once and destroyed in turn (repeated source creation).
 	{
 		auto second = createTextEngine();
